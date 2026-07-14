@@ -4,9 +4,10 @@ Este documento presenta la hoja de ruta detallada para el desarrollo incremental
 
 ```mermaid
 graph TD
-    F1[Fase 1: Motor Base & Simulación CLI] --> F2[Fase 2: WebSockets & Base de Datos 1v1]
+    F1[Fase 1: Motor Base & Simulación CLI] --> F1b[Fase 1.b: Servidor API Local & UI en React + Anime.js]
+    F1b --> F2[Fase 2: WebSockets & Base de Datos 1v1]
     F2 --> F3[Fase 3: Mapas Estructurados & Equipamiento]
-    F3 --> F4[Fase 4: Combate Grupal & Voz Bidireccional]
+    F3 --> F4[F4: Combate Grupal & Voz Bidireccional]
     F4 --> F5[F5: Interfaz Web Premium & Visuales]
     F5 --> F6[F6: Creadores & Eventos Dinámicos]
 ```
@@ -21,6 +22,15 @@ graph TD
   * **Moderación (+18):** Filtro de seguridad que banea contenido sensible, penalizando la confianza del agente.
   * **Mecanismos de Continuidad (Fallbacks):** Respuestas y simulaciones predefinidas en caso de caídas de red o JSONs inválidos del LLM.
   * **Simulador CLI:** Interfaz interactiva de consola para disputar combates contra una CPU controlada por IA.
+
+## Fase 1.b: Servidor API Local e Interfaz Web en React
+* **Objetivo:** Facilitar la lectura de la información, estados de los personajes y resultados del combate mediante una interfaz de usuario web altamente estética e interactiva.
+* **Componentes clave:**
+  * **Servidor Express backend:** Servidor HTTP local en Node.js para servir el frontend React compilado y exponer las rutas REST del juego.
+  * **API REST de Combate:** Endpoints para crear personajes, iniciar combates y procesar rondas de juego con persistencia temporal en memoria.
+  * **Frontend React (Vite + TS):** SPA moderna que organiza las pantallas del juego (Creación, Selección de Mapa, Arena de Combate).
+  * **Animaciones con Anime.js:** Sacudidas de pantalla ante impactos, transiciones de valor elásticas en las barras de HP/Confianza y despliegues fluidos de estadísticas.
+  * **Diseño Visual Cyberpunk/Sci-Fi:** Estilo oscuro con bordes brillantes, glassmorphism y globos de diálogo para reacciones verbales de los agentes.
 
 ## Fase 2: Servidor API, Base de Datos y WebSockets (1v1)
 * **Objetivo:** Transformar la simulación local en un juego multijugador en tiempo real.
@@ -47,7 +57,7 @@ graph TD
     * Posibilidad de integrar modelos multimodales (ej: Gemini Multimodal Live API) para interacción directa por audio.
 
 ## Fase 5: Interfaz Web Premium (Visual & Animada)
-* **Objetivo:** Sustituir la consola de texto por una interfaz gráfica espectacular de nivel comercial.
+* **Objetivo:** Sustituir la interfaz web local simple por una interfaz gráfica espectacular de nivel comercial, usando frameworks avanzados de frontend.
 * **Componentes clave:**
   * **Frontend Moderno:** SPA con React, Vite o Next.js.
   * **Aesthethics:** Diseño premium con temática cyberpunk/futurista oscura, uso de gradientes brillantes, glassmorphism y fuentes tipográficas personalizadas de Google Fonts.
