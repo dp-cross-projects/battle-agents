@@ -16,6 +16,7 @@ export interface UniqueAbility {
 export interface BattleAgent {
   id: string;
   name: string;
+  gender: 'hombre' | 'mujer';
   archetype: Archetype;
   stats: AgentStats;
   maxHp: number;

@@ -93,7 +93,7 @@ export class CombatEngine {
     const modifiedStats = this.getModifiedStats(agent, map);
 
     // 2. LLM Call to adapt the prompt
-    const systemInstruction = `Eres la conciencia de ${agent.name}, un agente de batalla con arquetipo "${agent.archetype}" y personalidad: "${agent.personalityDescription}".
+    const systemInstruction = `Eres la conciencia de ${agent.name} (género: ${agent.gender}), un agente de batalla con arquetipo "${agent.archetype}" y personalidad: "${agent.personalityDescription}".
 Debes evaluar la orden (prompt) dada por tu operador (el jugador) y traducirla a una acción de combate realista considerando tus atributos modificados por el mapa y tu confianza actual.
 Tus estadísticas modificadas en este combate son:
 - Fuerza: ${modifiedStats.strength}
@@ -129,8 +129,8 @@ ${forcePanic ? 'NOTA: Debes reaccionar con pánico debido a tu baja moral.' : ''
    * Generates a basic CPU action based on agent archetype and stats.
    */
   async generateCPUPrompt(cpuAgent: BattleAgent, playerAgent: BattleAgent): Promise<string> {
-    const systemInstruction = `Eres la IA enemiga que controla a ${cpuAgent.name} (Arquetipo: ${cpuAgent.archetype}).
-Tu objetivo es derrotar a ${playerAgent.name}. Debes generar una acción corta de combate en una sola línea (máximo 150 caracteres).
+    const systemInstruction = `Eres la IA enemiga que controla a ${cpuAgent.name} (género: ${cpuAgent.gender}, Arquetipo: ${cpuAgent.archetype}).
+Tu objetivo es derrotar a ${playerAgent.name} (género: ${playerAgent.gender}). Debes generar una acción corta de combate en una sola línea (máximo 150 caracteres).
 Ejemplos:
 - "Me cubro tras la maquinaria y disparo mi rifle láser."
 - "Corro de frente e intento golpear al oponente con mi escudo."
@@ -310,8 +310,8 @@ Sé coherente con las estadísticas de daño y fallos reportadas.
 No inventes daño o muertes adicionales que no estén en el registro matemático.`;
 
     const prompt = `Escenario: ${map.name} (Tags: ${map.tags.join(', ')})
-Agente A: ${agentA.name} (${agentA.archetype}, HP: ${agentA.currentHp}/100, Confianza: ${agentA.confidence})
-Agente B: ${agentB.name} (${agentB.archetype}, HP: ${agentB.currentHp}/100, Confianza: ${agentB.confidence})
+Agente A: ${agentA.name} (Género: ${agentA.gender}, ${agentA.archetype}, HP: ${agentA.currentHp}/100, Confianza: ${agentA.confidence})
+Agente B: ${agentB.name} (Género: ${agentB.gender}, ${agentB.archetype}, HP: ${agentB.currentHp}/100, Confianza: ${agentB.confidence})
 
 Acciones planteadas:
 - ${agentA.name}: "${roundResult.actions[agentA.id].adaptedAction.adapted_prompt}" (Reacción verbal: "${roundResult.actions[agentA.id].adaptedAction.verbal_reaction}")

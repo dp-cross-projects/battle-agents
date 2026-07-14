@@ -12,6 +12,11 @@ export class CharacterCreator {
     type: 'object',
     properties: {
       name: { type: 'string', description: 'Nombre creativo para el personaje.' },
+      gender: { 
+        type: 'string', 
+        enum: ['hombre', 'mujer'], 
+        description: 'Género del personaje: hombre o mujer.' 
+      },
       archetype: { 
         type: 'string', 
         enum: ['cobarde_sarcastico', 'paladin_orgulloso', 'ansioso_inseguro', 'guerrero_pragmatico'],
@@ -38,20 +43,27 @@ export class CharacterCreator {
       },
       personalityDescription: { type: 'string', description: 'Descripción breve de cómo reacciona ante órdenes y cómo se comporta en batalla.' }
     },
-    required: ['name', 'archetype', 'stats', 'uniqueAbility', 'personalityDescription']
+    required: ['name', 'gender', 'archetype', 'stats', 'uniqueAbility', 'personalityDescription']
   };
 
   /**
    * Generates a balanced Battle Agent based on a narrative description prompt.
    */
-  async createCharacter(userPrompt: string): Promise<BattleAgent> {
-    const systemInstruction = `Eres el generador de agentes del juego Battle Agents.
+  async createCharacter(userPrompt: string, customName?: string, gender?: 'hombre' | 'mujer'): Promise<BattleAgent> {
+    let systemInstruction = `Eres el generador de agentes del juego Battle Agents.
 Tu tarea es tomar una descripción y generar un personaje con estadísticas balanceadas.
 Reglas estrictas de balance:
 1. Debes asignar exactamente 100 puntos en total distribuidos entre los 5 atributos (strength, agility, perception, resilience, intelligence).
 2. Cada atributo individual debe ser de al menos 5 y como máximo 50.
 3. El arquetipo debe ser uno de los cuatro permitidos.
-4. Genera un nombre y una habilidad única adaptados a la descripción narrativa.`;
+4. Genera un nombre, un género (hombre o mujer) y una habilidad única adaptados a la descripción narrativa.`;
+
+    if (customName) {
+      systemInstruction += `\n5. El nombre del personaje DEBE ser exactamente "${customName}".`;
+    }
+    if (gender) {
+      systemInstruction += `\n6. El género del personaje DEBE ser exactamente "${gender}". Asegúrate de usar pronombres y adjetivos en español que correspondan a este género (ej. "el cazarrecompensas" vs "la cazarrecompensas", "un paladín" vs "una paladina").`;
+    }
 
     const rawAgent = await this.llm.generateStructuredJSON<any>(
       `Genera un agente de batalla basado en este concepto: "${userPrompt}"`,
@@ -70,7 +82,8 @@ Reglas estrictas de balance:
 
     return {
       id: Math.random().toString(36).substring(2, 11),
-      name: rawAgent.name || 'Agente Sin Nombre',
+      name: customName || rawAgent.name || 'Agente Sin Nombre',
+      gender: gender || (rawAgent.gender as 'hombre' | 'mujer') || 'hombre',
       archetype: (rawAgent.archetype || 'guerrero_pragmatico') as Archetype,
       stats: normalizedStats,
       maxHp: 100,

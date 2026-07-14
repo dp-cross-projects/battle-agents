@@ -49,12 +49,15 @@ app.post('/api/character/create', async (req, res) => {
     return res.status(500).json({ error: 'El creador de personajes no está configurado por falta de proveedor de IA.' });
   }
   try {
-    const { prompt } = req.body;
+    const { prompt, name, gender } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: 'Falta el prompt de descripción del agente.' });
     }
-    console.log(`[API] Generando agente bajo concepto: "${prompt}"`);
-    const agent = await creator.createCharacter(prompt);
+    if (gender && gender !== 'hombre' && gender !== 'mujer') {
+      return res.status(400).json({ error: 'El género debe ser "hombre" o "mujer".' });
+    }
+    console.log(`[API] Generando agente bajo concepto: "${prompt}" (Nombre: ${name || 'Aleatorio'}, Género: ${gender || 'Aleatorio'})`);
+    const agent = await creator.createCharacter(prompt, name || undefined, gender || undefined);
     res.json(agent);
   } catch (error: any) {
     console.error('[API Error] Falló la creación de personaje:', error);

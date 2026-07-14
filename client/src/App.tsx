@@ -139,7 +139,7 @@ export default function App() {
   }, [cpuAgent?.currentHp]);
 
   // Form handlers
-  const handleCreateCharacter = async (promptText: string) => {
+  const handleCreateCharacter = async (promptText: string, customName?: string, gender?: 'hombre' | 'mujer' | '') => {
     if (!promptText.trim()) return;
     setIsGenerating(true);
     setErrorMsg(null);
@@ -147,7 +147,11 @@ export default function App() {
       const res = await fetch('/api/character/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: promptText })
+        body: JSON.stringify({ 
+          prompt: promptText,
+          name: customName || undefined,
+          gender: gender || undefined
+        })
       });
       const data = await res.json();
       if (data.error) {
@@ -318,7 +322,7 @@ export default function App() {
             </p>
           </div>
 
-          <CharacterCreatorForm onSubmit={handleCreateCharacter} isLoading={isGenerating} />
+          <CharacterCreatorForm onSubmit={(prompt, name, gender) => handleCreateCharacter(prompt, name, gender)} isLoading={isGenerating} />
 
           {isGenerating && (
             <div className="flex flex-col items-center justify-center p-8 gap-4">
@@ -339,9 +343,14 @@ export default function App() {
             <div className="border-b border-slate-800 pb-3">
               <span className="text-xs font-mono text-purple-500 uppercase tracking-wider">Agente Creado</span>
               <h3 className="text-xl font-bold text-white">{playerAgent.name}</h3>
-              <span className="text-xs bg-purple-950/70 border border-purple-800/80 px-2 py-0.5 rounded text-purple-300 inline-block mt-1 font-mono">
-                {ARCHETYPE_LABELS[playerAgent.archetype] || playerAgent.archetype}
-              </span>
+              <div className="flex flex-wrap gap-2 mt-1">
+                <span className="text-xs bg-purple-950/70 border border-purple-800/80 px-2 py-0.5 rounded text-purple-300 font-mono">
+                  {ARCHETYPE_LABELS[playerAgent.archetype] || playerAgent.archetype}
+                </span>
+                <span className="text-xs bg-cyan-950/70 border border-cyan-800/80 px-2 py-0.5 rounded text-cyan-300 font-mono capitalize">
+                  {playerAgent.gender === 'hombre' ? 'Hombre ♂' : 'Mujer ♀'}
+                </span>
+              </div>
             </div>
             
             <p className="text-slate-400 text-xs italic">{playerAgent.personalityDescription}</p>
@@ -476,9 +485,14 @@ export default function App() {
                   <div>
                     <span className="text-[10px] font-mono text-red-400 uppercase tracking-widest block font-bold">Oponente (CPU)</span>
                     <h4 className="text-lg font-bold text-white mt-0.5">{cpuAgent.name}</h4>
-                    <span className="text-[9px] bg-red-950/80 border border-red-900 px-2 py-0.5 rounded text-red-300 font-mono mt-1 inline-block">
-                      {ARCHETYPE_LABELS[cpuAgent.archetype] || cpuAgent.archetype}
-                    </span>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      <span className="text-[9px] bg-red-950/80 border border-red-900 px-2 py-0.5 rounded text-red-300 font-mono">
+                        {ARCHETYPE_LABELS[cpuAgent.archetype] || cpuAgent.archetype}
+                      </span>
+                      <span className="text-[9px] bg-cyan-950/80 border border-cyan-900/80 px-2 py-0.5 rounded text-cyan-350 font-mono capitalize">
+                        {cpuAgent.gender === 'hombre' ? 'Hombre ♂' : 'Mujer ♀'}
+                      </span>
+                    </div>
                   </div>
                   <div className="text-right">
                     <span className="text-xl font-mono font-bold text-red-400">{cpuAgent.currentHp}/100 HP</span>
@@ -545,9 +559,14 @@ export default function App() {
                   <div>
                     <span className="text-[10px] font-mono text-purple-400 uppercase tracking-widest block font-bold">Tu Agente</span>
                     <h3 className="text-xl font-bold text-white mt-1">{playerAgent.name}</h3>
-                    <span className="text-[9px] bg-purple-950/80 border border-purple-800 px-2 py-0.5 rounded text-purple-300 font-mono mt-1 inline-block">
-                      {ARCHETYPE_LABELS[playerAgent.archetype] || playerAgent.archetype}
-                    </span>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      <span className="text-[9px] bg-purple-950/80 border border-purple-800 px-2 py-0.5 rounded text-purple-300 font-mono">
+                        {ARCHETYPE_LABELS[playerAgent.archetype] || playerAgent.archetype}
+                      </span>
+                      <span className="text-[9px] bg-cyan-950/80 border border-cyan-900/80 px-2 py-0.5 rounded text-cyan-300 font-mono capitalize">
+                        {playerAgent.gender === 'hombre' ? 'Hombre ♂' : 'Mujer ♀'}
+                      </span>
+                    </div>
                   </div>
                   <div className="text-right">
                     <span className="text-xl font-mono font-bold text-purple-400">{playerAgent.currentHp}/100 HP</span>
@@ -766,12 +785,14 @@ export default function App() {
 
 // Sub-component: Form for character creation
 interface CharacterCreatorFormProps {
-  onSubmit: (prompt: string) => void;
+  onSubmit: (prompt: string, name: string, gender: 'hombre' | 'mujer' | '') => void;
   isLoading: boolean;
 }
 
 function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps) {
   const [promptVal, setPromptVal] = useState('');
+  const [nameVal, setNameVal] = useState('');
+  const [genderVal, setGenderVal] = useState<'hombre' | 'mujer' | ''>('');
   
   const examples = [
     'Un ciborg silencioso experto en infiltración y dagas.',
@@ -783,19 +804,87 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!promptVal.trim() || isLoading) return;
-    onSubmit(promptVal);
+    onSubmit(promptVal, nameVal, genderVal);
   };
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5 w-full">
-      <textarea 
-        disabled={isLoading}
-        value={promptVal}
-        onChange={(e) => setPromptVal(e.target.value)}
-        rows={5}
-        placeholder="Ej: Un androide de combate pesado con armadura reforzada, lento pero con una fuerza destructiva formidable..."
-        className="w-full bg-slate-950/85 border border-slate-800 hover:border-slate-700 focus:border-purple-500 text-white rounded-xl p-4 outline-none text-base font-mono placeholder:text-slate-700 transition resize-none"
-      />
+      {/* Name and Gender Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full text-left">
+        {/* Name input */}
+        <div className="flex flex-col gap-2">
+          <label className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+            Nombre del Agente
+          </label>
+          <input
+            type="text"
+            disabled={isLoading}
+            value={nameVal}
+            onChange={(e) => setNameVal(e.target.value)}
+            placeholder="Ej: Alpha-9, Vesper (Vacío para aleatorio)"
+            className="w-full bg-slate-950/85 border border-slate-800 hover:border-slate-700 focus:border-purple-500 text-white rounded-xl px-4 py-3 outline-none text-sm font-mono placeholder:text-slate-700 transition"
+          />
+        </div>
+
+        {/* Gender selector */}
+        <div className="flex flex-col gap-2">
+          <label className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+            Género del Agente
+          </label>
+          <div className="grid grid-cols-3 gap-2 h-[46px]">
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => setGenderVal('hombre')}
+              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${
+                genderVal === 'hombre'
+                  ? 'bg-purple-950/40 border-purple-500 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.2)]'
+                  : 'bg-slate-950/60 border-slate-900 text-slate-400 hover:border-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <span>👨</span> Hombre
+            </button>
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => setGenderVal('mujer')}
+              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${
+                genderVal === 'mujer'
+                  ? 'bg-purple-950/40 border-purple-500 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.2)]'
+                  : 'bg-slate-950/60 border-slate-900 text-slate-400 hover:border-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <span>👩</span> Mujer
+            </button>
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => setGenderVal('')}
+              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${
+                genderVal === ''
+                  ? 'bg-purple-950/40 border-purple-500 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.2)]'
+                  : 'bg-slate-950/60 border-slate-900 text-slate-400 hover:border-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <span>🎲</span> Aleatorio
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 text-left">
+        <label className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+          Descripción / Concepto
+        </label>
+        <textarea 
+          disabled={isLoading}
+          value={promptVal}
+          onChange={(e) => setPromptVal(e.target.value)}
+          rows={5}
+          placeholder="Ej: Un androide de combate pesado con armadura reforzada, lento pero con una fuerza destructiva formidable..."
+          className="w-full bg-slate-950/85 border border-slate-800 hover:border-slate-700 focus:border-purple-500 text-white rounded-xl p-4 outline-none text-base font-mono placeholder:text-slate-700 transition resize-none"
+        />
+      </div>
 
       <div className="flex flex-col gap-3 items-center w-full">
         <span className="text-slate-500 text-[10px] font-mono font-bold uppercase tracking-widest text-center">
@@ -819,7 +908,7 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
       <button 
         type="submit"
         disabled={isLoading || !promptVal.trim()}
-        className="w-full max-w-lg self-center btn-neon btn-neon-purple mt-2 disabled:opacity-50 disabled:pointer-events-none py-3 text-sm"
+        className="w-full max-w-lg self-center btn-neon btn-neon-purple mt-2 disabled:opacity-50 disabled:pointer-events-none py-3 text-sm font-mono cursor-pointer"
       >
         Construir Agente
       </button>

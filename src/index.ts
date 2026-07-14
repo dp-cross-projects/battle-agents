@@ -38,7 +38,24 @@ async function main() {
 
   // 2. Character Creation
   console.log('--- CREACIÓN DE TU BATTLE AGENT ---');
-  console.log('Describe la personalidad, historia y estilo de tu personaje.');
+  const customNameInput = await rl.question('Nombre de tu agente (presiona Enter para generar uno aleatorio): ');
+  const customName = customNameInput.trim() || undefined;
+
+  let gender: 'hombre' | 'mujer' | undefined = undefined;
+  while (true) {
+    const genderInput = await rl.question('Género de tu agente (hombre/mujer o presiona Enter para aleatorio): ');
+    const trimmed = genderInput.trim().toLowerCase();
+    if (trimmed === '') {
+      break;
+    }
+    if (trimmed === 'hombre' || trimmed === 'mujer') {
+      gender = trimmed as 'hombre' | 'mujer';
+      break;
+    }
+    console.log('Por favor ingresa "hombre" o "mujer" (o presiona Enter para aleatorio).');
+  }
+
+  console.log('\nDescribe la personalidad, historia y estilo de tu personaje.');
   console.log('Ejemplo: "Un sigiloso ciborg cazarrecompensas que usa armas de plasma y odia el contacto físico."');
   
   const description = await rl.question('\nConcepto de tu agente: ');
@@ -46,7 +63,7 @@ async function main() {
 
   let playerAgent: BattleAgent;
   try {
-    playerAgent = await creator.createCharacter(description);
+    playerAgent = await creator.createCharacter(description, customName, gender);
     printAgentSheet(playerAgent);
   } catch (error: any) {
     console.error('\n[Error] No se pudo generar el agente del jugador.');
@@ -168,6 +185,7 @@ async function main() {
 function printAgentSheet(agent: BattleAgent) {
   console.log('==================================================');
   console.log(` Nombre:      ${agent.name}`);
+  console.log(` Género:      ${agent.gender}`);
   console.log(` Arquetipo:  ${agent.archetype}`);
   console.log(` Personalidad: ${agent.personalityDescription}`);
   console.log('---------------- Atributos Base ------------------');
