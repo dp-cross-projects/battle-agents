@@ -42,14 +42,14 @@ async function main() {
   console.log('Ejemplo: "Un sigiloso ciborg cazarrecompensas que usa armas de plasma y odia el contacto físico."');
   
   const description = await rl.question('\nConcepto de tu agente: ');
-  console.log('\n[IA] Generando ficha balanceada (100 puntos de atributos)...');
+  console.log('\n[IA] Generando agente balanceado (100 puntos de atributos)...');
 
   let playerAgent: BattleAgent;
   try {
     playerAgent = await creator.createCharacter(description);
     printAgentSheet(playerAgent);
   } catch (error: any) {
-    console.error('\n[Error] No se pudo generar la ficha del jugador.');
+    console.error('\n[Error] No se pudo generar el agente del jugador.');
     console.error(error.message);
     rl.close();
     return;
@@ -67,10 +67,10 @@ async function main() {
   let cpuAgent: BattleAgent;
   try {
     cpuAgent = await creator.createCharacter(randomConcept);
-    console.log('\n--- FICHA DEL OPONENTE (CPU) ---');
+    console.log('\n--- AGENTE DEL OPONENTE (CPU) ---');
     printAgentSheet(cpuAgent);
   } catch (error: any) {
-    console.error('\n[Error] No se pudo generar la ficha de la CPU.');
+    console.error('\n[Error] No se pudo generar el agente de la CPU.');
     console.error(error.message);
     rl.close();
     return;

@@ -45,7 +45,7 @@ export class CharacterCreator {
    * Generates a balanced Battle Agent based on a narrative description prompt.
    */
   async createCharacter(userPrompt: string): Promise<BattleAgent> {
-    const systemInstruction = `Eres el generador de fichas del juego Battle Agents.
+    const systemInstruction = `Eres el generador de agentes del juego Battle Agents.
 Tu tarea es tomar una descripción y generar un personaje con estadísticas balanceadas.
 Reglas estrictas de balance:
 1. Debes asignar exactamente 100 puntos en total distribuidos entre los 5 atributos (strength, agility, perception, resilience, intelligence).
