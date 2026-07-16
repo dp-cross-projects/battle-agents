@@ -32,8 +32,9 @@ graph TD
   * **Animaciones con Anime.js:** Sacudidas de pantalla ante impactos, transiciones de valor elásticas en las barras de HP/Confianza y despliegues fluidos de estadísticas.
   * **Diseño Visual Cyberpunk/Sci-Fi:** Estilo oscuro con bordes brillantes, glassmorphism y globos de diálogo para reacciones verbales de los agentes.
 
-## Fase 2: Servidor API, Base de Datos y WebSockets (1v1)
+## Fase 2: Servidor API, Base de Datos y WebSockets (1v1) [COMPLETADA]
 * **Objetivo:** Transformar la simulación local en un juego multijugador en tiempo real.
+* **Estado:** Completada e Implementada.
 * **Componentes clave:**
   * **Servidor Backend:** API en Node.js (TypeScript) usando Fastify o Express.
   * **Conexión en Tiempo Real:** Integración de **Socket.io** para la sincronización del chat de combate y el envío simultáneo de turnos.

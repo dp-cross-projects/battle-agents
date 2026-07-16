@@ -1,0 +1,71 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String   // Hashed password
+  createdAt DateTime @default(now())
+
+  // Relations
+  agents          Agent[]
+  combatesPlayer1 Combat[] @relation("Player1Relation")
+  combatesPlayer2 Combat[] @relation("Player2Relation")
+  combatesWon     Combat[] @relation("WinnerRelation")
+}
+
+model Agent {
+  id                     String   @id @default(uuid())
+  name                   String
+  gender                 String   // "hombre" or "mujer"
+  archetype              String   // e.g. "cobarde_sarcastico", etc.
+  strength               Int
+  agility                Int
+  perception             Int
+  resilience             Int
+  intelligence           Int
+  maxHp                  Int      @default(100)
+  confidence             Int      @default(50) // Persistent confidence, accumulates after fights
+  uniqueAbilityName      String
+  uniqueAbilityDesc      String
+  personalityDescription String
+  createdAt              DateTime @default(now())
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Combates where this agent participated
+  combatesAsAgent1 Combat[] @relation("Agent1Relation")
+  combatesAsAgent2 Combat[] @relation("Agent2Relation")
+}
+
+model Combat {
+  id           String   @id @default(uuid())
+  mapName      String
+  createdAt    DateTime @default(now())
+  roundsCount  Int
+  mathLog      String   @db.Text // stores detailed calculations / log
+
+  // Player 1 (Creator/Challenger)
+  player1Id String
+  player1   User   @relation("Player1Relation", fields: [player1Id], references: [id])
+  agent1Id  String
+  agent1    Agent  @relation("Agent1Relation", fields: [agent1Id], references: [id])
+
+  // Player 2 (Opponent)
+  player2Id String
+  player2   User   @relation("Player2Relation", fields: [player2Id], references: [id])
+  agent2Id  String
+  agent2    Agent  @relation("Agent2Relation", fields: [agent2Id], references: [id])
+
+  // Result
+  winnerId String?
+  winner   User?   @relation("WinnerRelation", fields: [winnerId], references: [id])
+}

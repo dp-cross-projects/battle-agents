@@ -114,11 +114,18 @@ Reglas de adaptación:
 ${forcePanic ? 'NOTA: Debes reaccionar con pánico debido a tu baja moral.' : ''}`;
 
     try {
-      return await this.llm.generateStructuredJSON<LLMActionResponse>(
+      const response = await this.llm.generateStructuredJSON<LLMActionResponse>(
         prompt, 
         CombatEngine.ACTION_SCHEMA, 
         systemInstruction
       );
+      // Sanitize confidence_modifier to be a valid number
+      if (response) {
+        response.confidence_modifier = typeof response.confidence_modifier === 'number' && !isNaN(response.confidence_modifier)
+          ? response.confidence_modifier
+          : parseInt(response.confidence_modifier as any) || 0;
+      }
+      return response;
     } catch (error) {
       // Fallback in case of LLM parse failure
       return this.getFallbackAction(rawPrompt, agent);
