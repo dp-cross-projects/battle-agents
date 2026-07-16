@@ -96,6 +96,182 @@ export default function App() {
   const [winner, setWinner] = useState<'player' | 'cpu' | 'empate' | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Audio/Voz States
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
+  const [isListening, setIsListening] = useState(false);
+  const [transmissionMode, setTransmissionMode] = useState<'voice' | 'text'>('voice');
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const recordingTimeoutRef = useRef<any>(null);
+
+  // Preload voices
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      const handleVoicesChanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+      window.speechSynthesis.addEventListener('voiceschanged', handleVoicesChanged);
+      return () => {
+        window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
+      };
+    }
+  }, []);
+
+  const startVoiceRecognition = () => {
+    if (isFighting || isProcessingVoice) return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setErrorMsg("El navegador no soporta reconocimiento de voz nativo.");
+      return;
+    }
+
+    if (isListening) {
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+        recordingTimeoutRef.current = null;
+      }
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      return;
+    }
+
+    const rec = new SpeechRecognition();
+    rec.lang = 'es-ES';
+    rec.interimResults = false;
+    rec.continuous = false;
+
+    rec.onstart = () => {
+      setIsListening(true);
+      // Auto-stop recording after 10 seconds
+      recordingTimeoutRef.current = setTimeout(() => {
+        if (rec) {
+          console.log("[STT] Límite de 10 segundos alcanzado, deteniendo...");
+          rec.stop();
+        }
+      }, 10000);
+    };
+
+    rec.onend = () => {
+      setIsListening(false);
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+        recordingTimeoutRef.current = null;
+      }
+    };
+
+    rec.onerror = (e: any) => {
+      console.error("Speech Recognition error:", e);
+      setIsListening(false);
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+        recordingTimeoutRef.current = null;
+      }
+      if (e.error !== 'no-speech') {
+        setErrorMsg(`Error de reconocimiento de voz: ${e.error}`);
+      }
+    };
+
+    rec.onresult = async (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      if (transcript && transcript.trim()) {
+        setIsProcessingVoice(true);
+        try {
+          // Send the transcribed speech directly to the server without showing it to the user
+          await executeActionSubmission(transcript);
+        } catch (err: any) {
+          console.error("Error submitting voice action:", err);
+          setErrorMsg(err.message || "Error al transmitir orden de voz.");
+        } finally {
+          setIsProcessingVoice(false);
+        }
+      }
+    };
+
+    recognitionRef.current = rec;
+    rec.start();
+  };
+
+  const speakText = (text: string, gender: 'hombre' | 'mujer', archetype: string): Promise<void> => {
+    return new Promise((resolve) => {
+      if (!isVoiceEnabled || !('speechSynthesis' in window) || !text) {
+        resolve();
+        return;
+      }
+
+      // Cancel previous utterances to avoid queuing conflicts
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'es-ES';
+
+      // Set voice options based on archetype
+      switch (archetype) {
+        case 'cobarde_sarcastico':
+          utterance.pitch = 1.25;
+          utterance.rate = 1.15;
+          break;
+        case 'paladin_orgulloso':
+          utterance.pitch = 0.85;
+          utterance.rate = 0.9;
+          break;
+        case 'ansioso_inseguro':
+          utterance.pitch = 1.15;
+          utterance.rate = 1.35;
+          break;
+        case 'guerrero_pragmatico':
+        default:
+          utterance.pitch = 1.0;
+          utterance.rate = 1.05;
+      }
+
+      // Select matching voice
+      const voices = window.speechSynthesis.getVoices();
+      const targetVoice = voices.find(v => {
+        const isSpanish = v.lang.startsWith('es');
+        const name = v.name.toLowerCase();
+        const isMale = name.includes('male') || name.includes('david') || name.includes('pablo') || name.includes('julio') || name.includes('helena') === false;
+        const isFemale = name.includes('female') || name.includes('helena') || name.includes('sara') || name.includes('zira') || name.includes('sabina');
+        
+        if (gender === 'hombre') return isSpanish && isMale;
+        return isSpanish && isFemale;
+      });
+
+      if (targetVoice) {
+        utterance.voice = targetVoice;
+      }
+
+      utterance.onend = () => {
+        resolve();
+      };
+
+      utterance.onerror = (e) => {
+        console.error("Speech synthesis error:", e);
+        resolve();
+      };
+
+      window.speechSynthesis.speak(utterance);
+    });
+  };
+
+  const triggerSequentialSpeech = async (
+    playerText: string, 
+    playerGender: 'hombre' | 'mujer', 
+    playerArchetype: string,
+    cpuText: string,
+    cpuGender: 'hombre' | 'mujer',
+    cpuArchetype: string
+  ) => {
+    if (!isVoiceEnabled) return;
+    try {
+      // ONLY speak the player's agent verbal reaction, as requested
+      await speakText(playerText, playerGender, playerArchetype);
+    } catch (e) {
+      console.error("Error in agent speech:", e);
+    }
+  };
+
   const prevPlayerHpRef = useRef<number>(100);
   const prevCpuHpRef = useRef<number>(100);
 
@@ -243,8 +419,13 @@ export default function App() {
       setPlayerBoosters(isP1 ? p1Boosters : p2Boosters);
       setCpuBoosters(isP1 ? p2Boosters : p1Boosters);
 
-      setPlayerBubble(roundResult.actions[meAgent.id].adaptedAction.verbal_reaction);
-      setCpuBubble(roundResult.actions[oppAgent.id].adaptedAction.verbal_reaction);
+      const pReact = roundResult.actions[meAgent.id].adaptedAction.verbal_reaction;
+      const cReact = roundResult.actions[oppAgent.id].adaptedAction.verbal_reaction;
+
+      setPlayerBubble(pReact);
+      setCpuBubble(cReact);
+
+      triggerSequentialSpeech(pReact, meAgent.gender, meAgent.archetype, cReact, oppAgent.gender, oppAgent.archetype);
 
       setNarrativeHistory(prev => [...prev, roundResult.narrative]);
       setMathLogs(prev => [...prev, ...roundResult.mathLog, '---']);
@@ -487,10 +668,8 @@ export default function App() {
     }
   };
 
-  // Submit round action
-  const handleExecuteRound = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!playerActionPrompt.trim() || isFighting || !playerAgent) return;
+  const executeActionSubmission = async (prompt: string) => {
+    if (!prompt.trim() || isFighting || !playerAgent) return;
 
     if (combatMode === 'cpu') {
       setIsFighting(true);
@@ -503,7 +682,7 @@ export default function App() {
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({ 
-            actionPrompt: playerActionPrompt,
+            actionPrompt: prompt,
             activeBoosterId: activeBoosterId
           })
         });
@@ -511,9 +690,20 @@ export default function App() {
         if (data.error) throw new Error(data.error);
 
         const roundRes = data.roundResult as CombatRoundResult;
-        
-        setPlayerBubble(roundRes.actions[playerAgent.id].adaptedAction.verbal_reaction);
-        setCpuBubble(roundRes.actions[cpuAgent!.id].adaptedAction.verbal_reaction);
+        const pReact = roundRes.actions[playerAgent.id].adaptedAction.verbal_reaction;
+        const cReact = roundRes.actions[cpuAgent!.id].adaptedAction.verbal_reaction;
+
+        setPlayerBubble(pReact);
+        setCpuBubble(cReact);
+
+        triggerSequentialSpeech(
+          pReact, 
+          playerAgent.gender, 
+          playerAgent.archetype, 
+          cReact, 
+          cpuAgent!.gender, 
+          cpuAgent!.archetype
+        );
 
         setPlayerAgent(data.playerAgent);
         setCpuAgent(data.cpuAgent);
@@ -551,12 +741,18 @@ export default function App() {
       setIsFighting(true);
       socket.emit('submit_action', {
         combatId: pvpCombatId,
-        actionPrompt: playerActionPrompt,
+        actionPrompt: prompt,
         activeBoosterId: activeBoosterId
       });
       setPlayerActionPrompt('');
       setActiveBoosterId(null);
     }
+  };
+
+  // Submit round action
+  const handleExecuteRound = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await executeActionSubmission(playerActionPrompt);
   };
 
 
@@ -1174,8 +1370,21 @@ export default function App() {
                   <p className="text-slate-400 text-xs leading-relaxed mt-0.5">{selectedMap.impactDescription}</p>
                 </div>
               </div>
-              <div className="bg-cyan-950/70 border border-cyan-800 px-4 py-2 rounded-lg font-mono text-sm text-cyan-400 font-bold self-stretch md:self-auto flex items-center justify-center">
-                RONDA {round}
+              <div className="flex items-center gap-3 self-stretch md:self-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+                  className={`btn-neon font-mono text-xs px-3 py-2 flex items-center gap-1.5 cursor-pointer ${
+                    isVoiceEnabled 
+                      ? 'btn-neon-cyan' 
+                      : 'border border-slate-855 text-slate-500 bg-slate-950/60 hover:border-slate-800'
+                  }`}
+                >
+                  {isVoiceEnabled ? '🔊 VOZ ACTIVA' : '🔇 VOZ SILENCIADA'}
+                </button>
+                <div className="bg-cyan-950/70 border border-cyan-800 px-4 py-2 rounded-lg font-mono text-sm text-cyan-400 font-bold flex items-center justify-center">
+                  RONDA {round}
+                </div>
               </div>
             </div>
 
@@ -1412,37 +1621,135 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Turn action form */}
-                <form onSubmit={handleExecuteRound} className="flex flex-col gap-3 mt-1 font-mono">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    TRANSMITIR ACCIÓN DE COMBATE:
-                  </label>
-                  <textarea 
-                    disabled={isFighting}
-                    value={playerActionPrompt}
-                    onChange={(e) => setPlayerActionPrompt(e.target.value)}
-                    rows={2}
-                    placeholder="Ej: 'Aprovecha el entorno para flanquear y atacar...' o 'Esquiva los proyectiles cubriéndote'..."
-                    className="w-full bg-slate-950/80 border border-slate-900 hover:border-slate-800 focus:border-cyan-500 text-white rounded-lg p-3 outline-none text-xs placeholder:text-slate-700 transition resize-none"
-                  />
-                  
-                  <div className="flex justify-between items-center mt-1">
-                    <div>
-                      {combatMode === 'pvp' && isFighting && (
-                        <span className="text-[10px] text-purple-400 animate-pulse font-bold">
-                          ACCIÓN ENVIADA. ESPERANDO AL OPERADOR RIVAL...
-                        </span>
-                      )}
-                    </div>
-                    <button 
-                      type="submit"
-                      disabled={isFighting || !playerActionPrompt.trim()}
-                      className="btn-neon btn-neon-cyan px-6 py-2.5 text-xs w-full sm:w-auto"
+                {/* Transmission Mode Switcher */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mt-2 border-b border-slate-850 pb-3 mb-3 font-mono">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                    MODO DE TRANSMISIÓN DE ÓRDENES:
+                  </span>
+                  <div className="flex gap-1 bg-slate-950 p-1 rounded-lg border border-slate-900 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      disabled={isFighting || isListening || isProcessingVoice}
+                      onClick={() => setTransmissionMode('voice')}
+                      className={`flex-1 sm:flex-initial px-3 py-1.5 rounded text-[10px] font-bold tracking-wider transition-all duration-200 cursor-pointer ${
+                        transmissionMode === 'voice'
+                          ? 'bg-cyan-500 text-black shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                          : 'text-slate-500 hover:text-slate-350'
+                      }`}
                     >
-                      {isFighting && combatMode === 'cpu' ? 'RESOLVIENDO...' : 'TRANSMITIR ORDEN'}
+                      🎙️ ENLACE NEURAL (VOZ)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isFighting || isListening || isProcessingVoice}
+                      onClick={() => setTransmissionMode('text')}
+                      className={`flex-1 sm:flex-initial px-3 py-1.5 rounded text-[10px] font-bold tracking-wider transition-all duration-200 cursor-pointer ${
+                        transmissionMode === 'text'
+                          ? 'bg-cyan-500 text-black shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                          : 'text-slate-500 hover:text-slate-350'
+                      }`}
+                    >
+                      ⌨️ CONSOLA DE TEXTO
                     </button>
                   </div>
-                </form>
+                </div>
+
+                {/* Action input panel */}
+                {transmissionMode === 'voice' ? (
+                  <div className="glass-panel p-5 border border-slate-850 bg-slate-950/20 flex flex-col items-center justify-center text-center gap-4 min-h-[140px] font-mono relative overflow-hidden">
+                    {/* Pulsing indicator background when recording */}
+                    {isListening && (
+                      <div className="absolute inset-0 bg-red-950/5 animate-pulse pointer-events-none" />
+                    )}
+
+                    {!isListening && !isProcessingVoice && (
+                      <>
+                        <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">
+                          ENLACE SENSORIAL PREPARADO
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isFighting}
+                          onClick={startVoiceRecognition}
+                          className="btn-neon btn-neon-cyan px-8 py-4 text-xs font-bold flex items-center gap-2 cursor-pointer scale-100 hover:scale-105 active:scale-95 transition-all duration-150"
+                        >
+                          🎤 INICIAR TRANSMISIÓN DE VOZ
+                        </button>
+                        <p className="text-[10px] text-slate-500 leading-normal max-w-xs">
+                          Al iniciar, dicta tu orden de combate. La orden se enviará de forma segura y directa al finalizar.
+                        </p>
+                      </>
+                    )}
+
+                    {isListening && (
+                      <div className="w-full flex flex-col items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={startVoiceRecognition}
+                          className="px-6 py-3 rounded-lg border border-red-500 bg-red-950/45 text-red-400 font-bold font-mono text-xs flex items-center justify-center gap-2 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.4)] cursor-pointer hover:bg-red-900/60 active:scale-95 transition-all"
+                        >
+                          🛑 DETENER Y TRANSMITIR
+                        </button>
+                        <div className="w-full max-w-sm flex flex-col gap-1.5 mt-2">
+                          <div className="flex justify-between items-center text-[9px] text-slate-500">
+                            <span className="font-bold tracking-widest text-red-400">TRANSMITIENDO ONDAS DE VOZ...</span>
+                            <span>MÁX. 10S</span>
+                          </div>
+                          <div className="w-full bg-slate-900/80 h-2 rounded-full overflow-hidden border border-slate-800 p-0.5">
+                            <div className="h-full bg-gradient-to-r from-red-500 via-orange-500 to-yellow-500 rounded-full record-timer-bar" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {isProcessingVoice && (
+                      <div className="flex flex-col items-center gap-3 py-4">
+                        <div className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-[10px] text-cyan-400 animate-pulse font-bold tracking-widest uppercase">
+                          PROCESANDO SEÑAL NEURAL Y ENVIANDO ACCIÓN...
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Pending state for PvP opponent */}
+                    {combatMode === 'pvp' && isFighting && !isProcessingVoice && (
+                      <div className="absolute inset-0 bg-slate-950/90 flex items-center justify-center text-[10px] text-purple-400 font-bold animate-pulse">
+                        TRANSMISIÓN COMPLETADA. ESPERANDO AL OPERADOR RIVAL...
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <form onSubmit={handleExecuteRound} className="flex flex-col gap-3 font-mono">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      CONSOLA DE TEXTO: TRANSMITIR ACCIÓN
+                    </label>
+                    <textarea 
+                      disabled={isFighting}
+                      value={playerActionPrompt}
+                      onChange={(e) => setPlayerActionPrompt(e.target.value)}
+                      rows={2}
+                      placeholder="Ej: 'Aprovecha el entorno para flanquear y atacar...' o 'Esquiva los proyectiles cubriéndote'..."
+                      className="w-full bg-slate-950/80 border border-slate-900 hover:border-slate-800 focus:border-cyan-500 text-white rounded-lg p-3 outline-none text-xs placeholder:text-slate-700 transition resize-none"
+                    />
+                    
+                    <div className="flex justify-between items-center mt-1">
+                      <div>
+                        {combatMode === 'pvp' && isFighting && (
+                          <span className="text-[10px] text-purple-400 animate-pulse font-bold">
+                            ACCIÓN ENVIADA. ESPERANDO AL OPERADOR RIVAL...
+                          </span>
+                        )}
+                      </div>
+                      <button 
+                        type="submit"
+                        disabled={isFighting || !playerActionPrompt.trim()}
+                        className="btn-neon btn-neon-cyan px-6 py-2.5 text-xs w-full sm:w-auto"
+                      >
+                        {isFighting && combatMode === 'cpu' ? 'RESOLVIENDO...' : 'TRANSMITIR ORDEN'}
+                      </button>
+                    </div>
+                  </form>
+                )}
 
                 {/* Show Math log toggler */}
                 <div className="mt-1 border-t border-slate-850 pt-2.5">

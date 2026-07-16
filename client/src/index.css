@@ -197,3 +197,13 @@ body {
   left: auto;
   right: 24px;
 }
+
+/* Voice recording timer animation */
+@keyframes recordTimer {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+.record-timer-bar {
+  animation: recordTimer 10s linear forwards;
+}
