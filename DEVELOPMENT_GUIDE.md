@@ -1,34 +1,36 @@
-# Guía de Desarrollo y Especificación Técnica: Battle Agents (Fase 2)
+# Guía de Desarrollo y Especificación Técnica: Battle Agents (Fase 3)
 
-Este documento es la especificación técnica y guía de desarrollo de la **Fase 2** del videojuego "Battle Agents". Recopila la arquitectura multijugador basada en Express y Socket.io, el esquema de datos en Prisma ORM para PostgreSQL, la integración de IA en tiempo real, el flujo de matchmaking PvP 1v1 y los componentes del frontend React.
+Este documento es la especificación técnica y guía de desarrollo de la **Fase 3** del videojuego "Battle Agents". Recopila la arquitectura multijugador y el motor de combate con soporte para 5 mapas dinámicos, el sistema de 20 boosters con límites de uso (usos/golpes), la fase de draft interactiva en tiempo real y la arena de combate PvP.
 
 ---
 
-## 1. Arquitectura del Sistema (Fase 2)
+## 1. Arquitectura del Sistema (Fase 3)
 
-En la Fase 2, el sistema adopta una arquitectura de cliente-servidor con conexiones duales (REST API para gestión y WebSockets para juego activo):
+En la Fase 3, el sistema expande el motor de combate en memoria y añade endpoints y eventos de WebSocket para el equipamiento pre-combate (Draft Phase):
 
-- **REST API (Express):** Maneja tareas asíncronas tradicionales como inicio de sesión, registro de operadores, creación e historial de personajes.
-- **WebSockets (Socket.io):** Maneja estados de alta frecuencia y baja latencia, como la cola de emparejamiento (matchmaking), la confirmación de acciones listas, y el chat de combate 1v1.
-- **Base de Datos (Prisma + PostgreSQL):** Persistencia relacional de credenciales, estadísticas de agentes y bitácora física de combates finalizados.
+- **REST API (Express):** Maneja la gestión tradicional, inicio de sesión, listado de mapas, personajes, y la consulta de boosters disponibles (`GET /api/boosters`).
+- **WebSockets (Socket.io):** Controla el matchmaking PvP 1v1, el envío simultáneo de borradores en la fase de draft, y el uso activo de boosters en cada ronda de la pelea en tiempo real.
+- **Motor de Combate (CombatEngine):** Calcula las iniciativas, absorciones de daño de armaduras, consumo de cargas de armas y herramientas, e impactos ambientales sobre los atributos modificados.
 
 ```
 ├── prisma/
 │   └── schema.prisma        # Modelos relacionales de base de datos
 ├── src/                     # Backend TypeScript
-│   ├── core/                # Lógica del motor, creador de personajes y filtros
+│   ├── core/                # Lógica del motor, catálogo de Boosters y filtros
+│   │   ├── Boosters.ts      # [NUEVO] Base de datos de 20 boosters
+│   │   ├── CombatEngine.ts  # Motor con 5 mapas y resolución de boosters
 │   ├── providers/           # Proveedores de LLM (Ollama & Gemini)
 │   ├── types/               # Tipos de TypeScript compartidos
 │   ├── utils/               # Utilidades de autenticación y mapeadores
-│   ├── server.ts            # Punto de entrada HTTP y WebSocket
+│   ├── server.ts            # Servidor HTTP, WebSocket y sesiones de combate CPU/PvP
 │   └── db.ts                # Cliente prisma compartido
 ├── client/                  # Frontend Vite + React (TypeScript)
 │   ├── src/
-│   │   ├── App.tsx          # Pantalla principal y flujos de juego
+│   │   ├── App.tsx          # Pantallas de Auth, Lobby, Mapas, Draft y Arena
 │   │   ├── index.css        # Tokens CSS Cyberpunk y Glassmorphism
-│   │   └── main.tsx         # Punto de entrada de React
-│   └── vite.config.ts       # Configuración de Vite y WebSockets Proxy
+│   └── vite.config.ts       # Configuración de Vite y proxy
 ```
+
 
 ---
 
@@ -101,3 +103,26 @@ Para resolver esto:
 3. Mapeamos la interfaz dinámicamente según el rol:
    - Indicador del Operador Local (Tú): `isPlayer1 ? p1Ready : p2Ready`.
    - Indicador del Operador Rival (Rival): `isPlayer1 ? p2Ready : p1Ready`.
+
+---
+
+## 6. Fase de Draft y Selección de Boosters (Fase 3)
+
+La Fase 3 añade una capa estratégica de preparación donde el mapa de combate es revelado antes de elegir el equipamiento:
+
+### Catálogo de Boosters
+- Ubicación: `src/core/Boosters.ts`.
+- Tipos de Boosters:
+  - **Weapon**: Incrementan Fuerza/Percepción/Inteligencia. Consumen 1 de durabilidad al atacar en una ronda en la que se selecciona el arma activa.
+  - **Armor Parts (Head, Torso, Arms, Legs)**: Bonificaciones pasivas continuas y reducción de daño plano. Pierden 1 durabilidad cuando el agente recibe daño.
+  - **Tool**: Acciones activables antes de la iniciativa para sanar vida o alterar estados del rival.
+- Las estadísticas persistentes no se alteran; todo el inventario de combate y el estado de durabilidades se gestionan **en memoria** dentro del servidor y se sincronizan ronda a ronda.
+
+### Flujo de Sockets en el Draft
+1. Tras el emparejamiento, el servidor transiciona la sesión a `draftPhase = true` y envía el evento `match_found`.
+2. El cliente abre la pantalla `draft`, donde selecciona hasta 3 boosters (máximo).
+3. Al presionar **Confirmar Equipamiento**, el cliente envía el evento `submit_draft` con la lista de IDs seleccionados.
+4. El servidor registra la confirmación de ese jugador y emite `player_draft_status` a la sala para actualizar los indicadores.
+5. Cuando ambos jugadores han confirmado, el servidor clona las instancias de los boosters, los asigna al jugador respectivo, desactiva `draftPhase` y emite `draft_completed` con los boosters resultantes.
+6. El cliente React recibe `draft_completed`, desactiva el bloqueo de combate (`isFighting = false`) y carga la pantalla `arena`.
+

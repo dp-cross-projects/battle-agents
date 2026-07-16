@@ -7,8 +7,11 @@ import { BattleAgent, MapScenario, CombatRoundResult } from '../../src/types/ind
 const MAP_THEMES: Record<string, { icon: string; clr: string }> = {
   'Coliseo de Acero': { icon: '🛡️', clr: 'var(--clr-cyan)' },
   'Pantano Neblinoso': { icon: '☣️', clr: 'var(--clr-green)' },
-  'Fábrica Abandonada': { icon: '⚙️', clr: 'var(--clr-purple)' }
+  'Fábrica Abandonada': { icon: '⚙️', clr: 'var(--clr-purple)' },
+  'Desierto Calcinante': { icon: '🏜️', clr: 'var(--clr-yellow)' },
+  'Laboratorio de Gravedad Cero': { icon: '🛰️', clr: 'var(--clr-cyan)' }
 };
+
 
 const ARCHETYPE_LABELS: Record<string, string> = {
   'cobarde_sarcastico': 'Cobarde Sarcástico',
@@ -31,17 +34,27 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // Screen flow: 'auth' | 'lobby' | 'map_selection' | 'matchmaking' | 'arena' | 'result'
-  const [screen, setScreen] = useState<'auth' | 'lobby' | 'map_selection' | 'matchmaking' | 'arena' | 'result'>('auth');
+  // Screen flow: 'auth' | 'lobby' | 'map_selection' | 'draft' | 'matchmaking' | 'arena' | 'result'
+  const [screen, setScreen] = useState<'auth' | 'lobby' | 'map_selection' | 'draft' | 'matchmaking' | 'arena' | 'result'>('auth');
   const [agents, setAgents] = useState<BattleAgent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<BattleAgent | null>(null);
   const [showCreator, setShowCreator] = useState(false);
+
+  // Boosters State
+  const [boosters, setBoosters] = useState<Booster[]>([]);
+  const [selectedBoosters, setSelectedBoosters] = useState<string[]>([]);
+  const [playerBoosters, setPlayerBoosters] = useState<Booster[]>([]);
+  const [cpuBoosters, setCpuBoosters] = useState<Booster[]>([]);
+  const [activeBoosterId, setActiveBoosterId] = useState<string | null>(null);
+  const [opponentDraftConfirmed, setOpponentDraftConfirmed] = useState(false);
+  const [draftTimer, setDraftTimer] = useState(60);
 
   // Game/Combat config
   const [combatMode, setCombatMode] = useState<'cpu' | 'pvp' | null>(null);
   const [pvpCombatId, setPvpCombatId] = useState<string | null>(null);
   const [maps, setMaps] = useState<MapScenario[]>([]);
   const [selectedMap, setSelectedMap] = useState<MapScenario | null>(null);
+
 
   // Combat States
   const [playerAgent, setPlayerAgent] = useState<BattleAgent | null>(null);
@@ -86,7 +99,7 @@ export default function App() {
   const prevPlayerHpRef = useRef<number>(100);
   const prevCpuHpRef = useRef<number>(100);
 
-  // Fetch maps
+  // Fetch maps and boosters
   useEffect(() => {
     fetch('/api/maps')
       .then(res => res.json())
@@ -98,7 +111,13 @@ export default function App() {
           { name: 'Fábrica Abandonada', statsModifiers: { intelligence: 10, strength: 5, perception: -5 }, tags: ['maquinaria', 'cobertura', 'sombras'], impactDescription: 'Mejora las tácticas tecnológicas e incrementa la fuerza con objetos de metal.' }
         ]);
       });
+
+    fetch('/api/boosters')
+      .then(res => res.json())
+      .then(data => setBoosters(data))
+      .catch(() => {});
   }, []);
+
 
   // Sync token / Fetch user info / Connect Socket
   useEffect(() => {
@@ -179,8 +198,24 @@ export default function App() {
       setPlayerBubble(`Yo soy ${me.agent.name}. Señal de combate PvP establecida.`);
       setCpuBubble(`Oponente detectado: ${opp.agent.name}. Listo para combatir.`);
 
-      setScreen('arena');
+      setSelectedBoosters([]);
+      setOpponentDraftConfirmed(false);
+      setScreen('draft');
       setIsFighting(false);
+    });
+
+    s.on('player_draft_status', ({ p1Ready: r1, p2Ready: r2 }) => {
+      const isP1 = isPlayer1Ref.current;
+      const oppReady = isP1 ? r2 : r1;
+      setOpponentDraftConfirmed(oppReady);
+    });
+
+    s.on('draft_completed', ({ p1Boosters, p2Boosters }) => {
+      const isP1 = isPlayer1Ref.current;
+      setPlayerBoosters(isP1 ? p1Boosters : p2Boosters);
+      setCpuBoosters(isP1 ? p2Boosters : p1Boosters);
+      setIsFighting(false);
+      setScreen('arena');
     });
 
     s.on('player_ready_status', ({ p1Ready: r1, p2Ready: r2 }) => {
@@ -195,7 +230,7 @@ export default function App() {
       }
     });
 
-    s.on('round_result', ({ roundResult, p1Agent, p2Agent, finished, winnerKey, winnerId }) => {
+    s.on('round_result', ({ roundResult, p1Agent, p2Agent, finished, winnerKey, winnerId, p1Boosters, p2Boosters }) => {
       setIsFighting(false);
 
       const isP1 = isPlayer1Ref.current;
@@ -204,6 +239,9 @@ export default function App() {
 
       setPlayerAgent(meAgent);
       setCpuAgent(oppAgent);
+
+      setPlayerBoosters(isP1 ? p1Boosters : p2Boosters);
+      setCpuBoosters(isP1 ? p2Boosters : p1Boosters);
 
       setPlayerBubble(roundResult.actions[meAgent.id].adaptedAction.verbal_reaction);
       setCpuBubble(roundResult.actions[oppAgent.id].adaptedAction.verbal_reaction);
@@ -232,6 +270,7 @@ export default function App() {
       }
     });
 
+
     s.on('opponent_disconnected', () => {
       setErrorMsg('Tu oponente se desconectó. Combate cancelado.');
       setScreen('lobby');
@@ -245,6 +284,26 @@ export default function App() {
 
     setSocket(s);
   };
+
+  // Draft Timer countdown for PvP
+  useEffect(() => {
+    if (screen !== 'draft' || combatMode !== 'pvp') return;
+    setDraftTimer(60);
+    const interval = setInterval(() => {
+      setDraftTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          // Auto submit draft
+          if (socket && pvpCombatId) {
+            socket.emit('submit_draft', { combatId: pvpCombatId, draftedBoosterIds: selectedBoosters });
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [screen, combatMode, socket, pvpCombatId, selectedBoosters]);
 
   // Animations effects
   useEffect(() => {
@@ -378,12 +437,17 @@ export default function App() {
   };
 
   // CPU Game triggers
-  const startCPUCombat = async (map: MapScenario) => {
-    if (!selectedAgent || !token) return;
+  const selectMapForCPU = (map: MapScenario) => {
     setSelectedMap(map);
+    setCombatMode('cpu');
+    setSelectedBoosters([]);
+    setScreen('draft');
+  };
+
+  const startCPUCombatWithBoosters = async () => {
+    if (!selectedAgent || !token || !selectedMap) return;
     setIsGenerating(true);
     setErrorMsg(null);
-    setCombatMode('cpu');
 
     try {
       const resStart = await fetch('/api/combat/start', {
@@ -394,7 +458,8 @@ export default function App() {
         },
         body: JSON.stringify({
           playerAgentId: selectedAgent.id,
-          mapName: map.name
+          mapName: selectedMap.name,
+          draftedBoosterIds: selectedBoosters
         })
       });
       const startData = await resStart.json();
@@ -402,12 +467,14 @@ export default function App() {
 
       setPlayerAgent(startData.playerAgent);
       setCpuAgent(startData.cpuAgent);
+      setPlayerBoosters(startData.playerBoosters || []);
+      setCpuBoosters(startData.cpuBoosters || []);
       
       prevPlayerHpRef.current = startData.playerAgent.maxHp;
       prevCpuHpRef.current = startData.cpuAgent.maxHp;
 
       setRound(1);
-      setNarrativeHistory([`Combate CPU iniciado en escenario: ${map.name}. ${map.impactDescription}`]);
+      setNarrativeHistory([`Combate CPU iniciado en escenario: ${selectedMap.name}. ${selectedMap.impactDescription}`]);
       setMathLogs([]);
       setPlayerBubble(`Inicializando combate contra unidad CPU. Listo.`);
       setCpuBubble(`Objetivo fijado: ${startData.playerAgent.name}.`);
@@ -435,7 +502,10 @@ export default function App() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ actionPrompt: playerActionPrompt })
+          body: JSON.stringify({ 
+            actionPrompt: playerActionPrompt,
+            activeBoosterId: activeBoosterId
+          })
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -447,6 +517,8 @@ export default function App() {
 
         setPlayerAgent(data.playerAgent);
         setCpuAgent(data.cpuAgent);
+        setPlayerBoosters(data.playerBoosters || []);
+        setCpuBoosters(data.cpuBoosters || []);
 
         setNarrativeHistory(prev => [...prev, roundRes.narrative]);
         setMathLogs(prev => [...prev, ...roundRes.mathLog, '---']);
@@ -459,6 +531,7 @@ export default function App() {
         });
 
         setPlayerActionPrompt('');
+        setActiveBoosterId(null);
 
         if (data.finished) {
           setWinner(data.winner);
@@ -478,11 +551,14 @@ export default function App() {
       setIsFighting(true);
       socket.emit('submit_action', {
         combatId: pvpCombatId,
-        actionPrompt: playerActionPrompt
+        actionPrompt: playerActionPrompt,
+        activeBoosterId: activeBoosterId
       });
       setPlayerActionPrompt('');
+      setActiveBoosterId(null);
     }
   };
+
 
   // Chat message submit
   const handleSendChat = (e: React.FormEvent) => {
@@ -504,6 +580,11 @@ export default function App() {
     setErrorMsg(null);
     setCombatMode(null);
     setPvpCombatId(null);
+    setSelectedBoosters([]);
+    setPlayerBoosters([]);
+    setCpuBoosters([]);
+    setActiveBoosterId(null);
+    setOpponentDraftConfirmed(false);
     setScreen('lobby');
   };
 
@@ -769,7 +850,7 @@ export default function App() {
                 <button 
                   key={map.name}
                   disabled={isGenerating}
-                  onClick={() => startCPUCombat(map)}
+                  onClick={() => selectMapForCPU(map)}
                   className="flex flex-col items-center justify-start text-center p-5 rounded-xl border border-slate-850 bg-slate-950/40 hover:bg-slate-900/30 hover:border-cyan-500/50 transition-all duration-300 cursor-pointer disabled:opacity-50 group"
                 >
                   <span className="text-4xl mb-3 group-hover:scale-110 transition-transform">{theme.icon}</span>
@@ -786,6 +867,264 @@ export default function App() {
               <p className="text-xs font-mono text-cyan-400 animate-pulse">Generando oponente holográfico...</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* -------------------- 3.b. SCREEN: DRAFT (CPU & PvP) -------------------- */}
+      {screen === 'draft' && selectedMap && selectedAgent && (
+        <div className="w-full max-w-5xl glass-panel p-6 flex flex-col gap-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-800">
+            <div>
+              <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest block font-bold">Fase de Preparación y Draft</span>
+              <h2 className="text-2xl font-bold font-mono text-white glow-text-purple">SELECCIÓN DE BOOSTERS</h2>
+              <p className="text-slate-400 text-xs mt-1">Selecciona hasta 3 boosters estratégicos que beneficien a tu agente según el entorno.</p>
+            </div>
+            <div className="flex items-center gap-4 self-stretch md:self-auto justify-between md:justify-end">
+              {combatMode === 'pvp' && (
+                <div className="bg-purple-950/40 border border-purple-800 px-4 py-2 rounded-lg font-mono text-xs text-purple-400 font-bold flex items-center gap-2">
+                  <span>⏱️ DRAFT TIMER:</span>
+                  <span className="text-white text-sm">{draftTimer}s</span>
+                </div>
+              )}
+              {combatMode === 'cpu' && (
+                <button
+                  onClick={() => {
+                    setScreen('map_selection');
+                    setCombatMode(null);
+                  }}
+                  className="text-xs font-mono text-slate-500 hover:text-slate-200 cursor-pointer"
+                >
+                  [ CAMBIAR MAPA ]
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Map Info Bar */}
+          <div className="bg-slate-950/60 border border-slate-900 p-4 rounded-xl flex items-center gap-4">
+            <span className="text-4xl">{MAP_THEMES[selectedMap.name]?.icon || '🗺️'}</span>
+            <div className="flex-grow">
+              <strong className="text-sm text-cyan-400 font-mono block">ESCENARIO DETECTADO: {selectedMap.name.toUpperCase()}</strong>
+              <p className="text-slate-400 text-xs mt-0.5">{selectedMap.impactDescription}</p>
+              <div className="flex gap-1.5 mt-2 flex-wrap">
+                {selectedMap.tags.map(t => (
+                  <span key={t} className="text-[9px] bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-slate-400 font-mono">
+                    #{t}
+                  </span>
+                ))}
+                {Object.entries(selectedMap.statsModifiers).map(([stat, val]) => (
+                  <span key={stat} className={`text-[9px] border px-2 py-0.5 rounded font-mono ${val > 0 ? 'bg-green-950/30 border-green-800 text-green-400' : 'bg-red-950/30 border-red-900 text-red-400'}`}>
+                    {stat.toUpperCase()}: {val > 0 ? `+${val}` : val}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Slots & Confirm Button */}
+          <div className="flex flex-col md:flex-row justify-between items-center bg-slate-950/40 border border-slate-900 p-4 rounded-xl gap-4">
+            <div className="flex flex-col gap-1 w-full md:w-auto">
+              <span className="text-[10px] font-mono text-slate-500 font-bold uppercase">Tus Ranuras de Equipamiento (Max 3):</span>
+              <div className="flex gap-2 mt-1">
+                {[0, 1, 2].map((slotIdx) => {
+                  const boosterId = selectedBoosters[slotIdx];
+                  const bDetails = boosters.find(b => b.id === boosterId);
+                  return (
+                    <div 
+                      key={slotIdx} 
+                      className={`flex-grow md:flex-grow-0 md:w-44 h-11 border rounded-lg flex items-center justify-center p-2 text-center text-xs font-mono transition-all duration-300 ${
+                        bDetails 
+                          ? 'bg-purple-950/20 border-purple-500/50 text-purple-300' 
+                          : 'bg-black/40 border-slate-900 text-slate-650 border-dashed'
+                      }`}
+                    >
+                      {bDetails ? bDetails.name : `[ Ranura Vacía ]`}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="w-full md:w-auto flex flex-col md:items-end gap-1.5">
+              {combatMode === 'pvp' && (
+                <div className="text-[10px] font-mono text-slate-500">
+                  Estado Oponente: {opponentDraftConfirmed ? <span className="text-green-400 font-bold">● LISTO</span> : <span className="text-yellow-500 animate-pulse">PLANIFICANDO...</span>}
+                </div>
+              )}
+              {combatMode === 'cpu' ? (
+                <button
+                  onClick={startCPUCombatWithBoosters}
+                  disabled={isGenerating}
+                  className="btn-neon btn-neon-cyan text-xs py-3.5 px-8 w-full md:w-auto font-bold uppercase tracking-wider"
+                >
+                  {isGenerating ? 'Inicializando Conexión...' : 'Comenzar Entrenamiento'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (socket && pvpCombatId) {
+                      socket.emit('submit_draft', { combatId: pvpCombatId, draftedBoosterIds: selectedBoosters });
+                      setIsFighting(true); // lock locally
+                    }
+                  }}
+                  disabled={isFighting}
+                  className="btn-neon btn-neon-purple text-xs py-3.5 px-8 w-full md:w-auto font-bold uppercase tracking-wider"
+                >
+                  {isFighting ? 'Esperando al Operador Rival...' : 'Confirmar Equipamiento'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Boosters Grid */}
+          <div className="flex flex-col gap-5 max-h-[460px] overflow-y-auto pr-1">
+            {/* Category: Weapons */}
+            <div>
+              <h4 className="font-mono text-xs text-slate-400 font-bold border-b border-slate-900 pb-1.5 mb-3 tracking-widest uppercase">
+                ⚔️ ARMAS (Activas - Consumen cargas al atacar)
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {boosters.filter(b => b.type === 'weapon').map((b) => {
+                  const isSelected = selectedBoosters.includes(b.id);
+                  const isLimit = selectedBoosters.length >= 3 && !isSelected;
+                  return (
+                    <button
+                      key={b.id}
+                      disabled={isFighting}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedBoosters(prev => prev.filter(id => id !== b.id));
+                        } else if (!isLimit) {
+                          setSelectedBoosters(prev => [...prev, b.id]);
+                        }
+                      }}
+                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${
+                        isSelected 
+                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.1)]' 
+                          : isLimit 
+                            ? 'bg-slate-950/20 border-slate-950 opacity-40 cursor-not-allowed'
+                            : 'bg-slate-950/40 border-slate-900 hover:border-slate-850 hover:bg-slate-900/10'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start w-full">
+                        <strong className="text-sm text-white font-mono">{b.name}</strong>
+                        <span className="text-[9px] bg-slate-900 border border-slate-800 text-slate-500 px-2 py-0.5 rounded font-mono">
+                          {b.durability} USOS
+                        </span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] leading-relaxed mt-2.5 flex-grow">{b.description}</p>
+                      {b.statsModifiers && (
+                        <div className="flex gap-1.5 mt-3 flex-wrap">
+                          {Object.entries(b.statsModifiers).map(([stat, val]) => (
+                            <span key={stat} className="text-[9px] font-mono text-purple-400 bg-purple-950/30 border border-purple-900/60 px-1.5 py-0.2 rounded font-bold uppercase font-bold">
+                              {stat}: {val > 0 ? `+${val}` : val}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Category: Armors */}
+            <div className="mt-2">
+              <h4 className="font-mono text-xs text-slate-400 font-bold border-b border-slate-900 pb-1.5 mb-3 tracking-widest uppercase">
+                🛡️ PARTES DE ARMADURA (Pasivas - Absorben daño al recibir golpes)
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {boosters.filter(b => ['head', 'torso', 'arms', 'legs'].includes(b.type)).map((b) => {
+                  const isSelected = selectedBoosters.includes(b.id);
+                  const isLimit = selectedBoosters.length >= 3 && !isSelected;
+                  const typeLabels: Record<string, string> = { head: 'Cabeza', torso: 'Torso', arms: 'Brazos', legs: 'Piernas' };
+                  return (
+                    <button
+                      key={b.id}
+                      disabled={isFighting}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedBoosters(prev => prev.filter(id => id !== b.id));
+                        } else if (!isLimit) {
+                          setSelectedBoosters(prev => [...prev, b.id]);
+                        }
+                      }}
+                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${
+                        isSelected 
+                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.15)]' 
+                          : isLimit 
+                            ? 'bg-slate-950/20 border-slate-950 opacity-40 cursor-not-allowed'
+                            : 'bg-slate-950/40 border-slate-900 hover:border-slate-850 hover:bg-slate-900/10'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start w-full">
+                        <div className="flex items-center gap-2">
+                          <strong className="text-sm text-white font-mono">{b.name}</strong>
+                          <span className="text-[8px] bg-slate-900 text-purple-400 border border-purple-950 px-1.5 py-0.2 rounded font-mono uppercase font-bold">
+                            {typeLabels[b.type]}
+                          </span>
+                        </div>
+                        <span className="text-[9px] bg-slate-900 border border-slate-800 text-slate-500 px-2 py-0.5 rounded font-mono">
+                          {b.durability} GOLPES
+                        </span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] leading-relaxed mt-2.5 flex-grow">{b.description}</p>
+                      {b.statsModifiers && (
+                        <div className="flex gap-1.5 mt-3 flex-wrap">
+                          {Object.entries(b.statsModifiers).map(([stat, val]) => (
+                            <span key={stat} className="text-[9px] font-mono text-purple-400 bg-purple-950/30 border border-purple-900/60 px-1.5 py-0.2 rounded font-bold uppercase font-bold">
+                              {stat}: {val > 0 ? `+${val}` : val}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Category: Tools */}
+            <div className="mt-2">
+              <h4 className="font-mono text-xs text-slate-400 font-bold border-b border-slate-900 pb-1.5 mb-3 tracking-widest uppercase">
+                🔧 HERRAMIENTAS (Activas - Decides cuándo activarlas en tu turno)
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {boosters.filter(b => b.type === 'tool').map((b) => {
+                  const isSelected = selectedBoosters.includes(b.id);
+                  const isLimit = selectedBoosters.length >= 3 && !isSelected;
+                  return (
+                    <button
+                      key={b.id}
+                      disabled={isFighting}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedBoosters(prev => prev.filter(id => id !== b.id));
+                        } else if (!isLimit) {
+                          setSelectedBoosters(prev => [...prev, b.id]);
+                        }
+                      }}
+                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${
+                        isSelected 
+                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.15)]' 
+                          : isLimit 
+                            ? 'bg-slate-950/20 border-slate-950 opacity-40 cursor-not-allowed'
+                            : 'bg-slate-950/40 border-slate-900 hover:border-slate-850 hover:bg-slate-900/10'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start w-full">
+                        <strong className="text-sm text-white font-mono">{b.name}</strong>
+                        <span className="text-[9px] bg-slate-900 border border-slate-800 text-slate-500 px-2 py-0.5 rounded font-mono">
+                          {b.durability} USOS
+                        </span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] leading-relaxed mt-2.5 flex-grow">{b.description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -859,6 +1198,53 @@ export default function App() {
                     </span>
                   )}
                 </div>
+
+                {playerBoosters && playerBoosters.length > 0 && (
+                  <div className="border-t border-slate-900/60 pt-3 mt-2 flex flex-col gap-2">
+                    <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest font-bold">Boosters Equipados:</span>
+                    <div className="flex gap-2">
+                      {playerBoosters.map((b) => {
+                        const isBroken = b.currentDurability <= 0;
+                        const isActiveSelected = activeBoosterId === b.id;
+                        const canActivate = !isBroken && (b.type === 'weapon' || b.type === 'tool');
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            disabled={isFighting || !canActivate}
+                            onClick={() => {
+                              if (isActiveSelected) {
+                                setActiveBoosterId(null);
+                              } else {
+                                setActiveBoosterId(b.id);
+                              }
+                            }}
+                            className={`flex-1 p-2 rounded-lg border text-left font-mono text-[10px] flex flex-col justify-between transition-all duration-200 cursor-pointer ${
+                              isBroken
+                                ? 'bg-black/60 border-slate-950 text-slate-700'
+                                : isActiveSelected
+                                  ? 'bg-cyan-950/30 border-cyan-500 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.2)]'
+                                  : canActivate
+                                    ? 'bg-slate-950 border-slate-900 hover:border-slate-800 text-slate-300 hover:scale-[1.02]'
+                                    : 'bg-slate-950 border-slate-900 text-slate-400 opacity-80 cursor-default' // passives (armor)
+                            }`}
+                          >
+                            <div className="flex justify-between w-full font-bold">
+                              <span className={isBroken ? 'line-through text-slate-650' : ''}>{b.name}</span>
+                              <span>{isBroken ? '❌' : b.type === 'weapon' ? '⚔️' : b.type === 'tool' ? '🔧' : '🛡️'}</span>
+                            </div>
+                            <div className="flex justify-between w-full text-[8px] text-slate-500 mt-1">
+                              <span>{b.type === 'weapon' || b.type === 'tool' ? 'Usos:' : 'Golpes:'}</span>
+                              <span className={isBroken ? 'text-red-500' : 'text-slate-300'}>
+                                {b.currentDurability}/{b.durability}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Opponent HP */}
@@ -878,6 +1264,38 @@ export default function App() {
                     </span>
                   )}
                 </div>
+
+                {cpuBoosters && cpuBoosters.length > 0 && (
+                  <div className="border-t border-slate-900/60 pt-3 mt-2 flex flex-col gap-2">
+                    <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest font-bold">Boosters Rivales:</span>
+                    <div className="flex gap-2">
+                      {cpuBoosters.map((b) => {
+                        const isBroken = b.currentDurability <= 0;
+                        return (
+                          <div
+                            key={b.id}
+                            className={`flex-1 p-2 rounded-lg border text-left font-mono text-[10px] flex flex-col justify-between ${
+                              isBroken
+                                ? 'bg-black/60 border-slate-950 text-slate-700'
+                                : 'bg-slate-950 border-slate-900 text-slate-400 opacity-90'
+                            }`}
+                          >
+                            <div className="flex justify-between w-full font-bold">
+                              <span className={isBroken ? 'line-through text-slate-650' : ''}>{b.name}</span>
+                              <span>{isBroken ? '❌' : b.type === 'weapon' ? '⚔️' : b.type === 'tool' ? '🔧' : '🛡️'}</span>
+                            </div>
+                            <div className="flex justify-between w-full text-[8px] text-slate-650 mt-1">
+                              <span>{b.type === 'weapon' || b.type === 'tool' ? 'Usos:' : 'Golpes:'}</span>
+                              <span className={isBroken ? 'text-red-500/60' : 'text-slate-450'}>
+                                {b.currentDurability}/{b.durability}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

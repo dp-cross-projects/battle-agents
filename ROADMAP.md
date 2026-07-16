@@ -14,7 +14,7 @@ graph TD
 
 ---
 
-## Fase 1: Motor Core y Simulación de Texto (Local/CLI)
+## Fase 1: Motor Core y Simulación de Texto (Local/CLI) [COMPLETADA]
 * **Objetivo:** Validar las matemáticas de combate, la generación balanceada y la interacción con IAs sin dependencias de red o interfaces complejas.
 * **Componentes clave:**
   * **Creación de Fichas (100 puntos):** Entrada de un prompt descriptivo que la IA traduce a una distribución balanceada de 100 puntos de stats base y HP inicial de 100.
@@ -23,7 +23,7 @@ graph TD
   * **Mecanismos de Continuidad (Fallbacks):** Respuestas y simulaciones predefinidas en caso de caídas de red o JSONs inválidos del LLM.
   * **Simulador CLI:** Interfaz interactiva de consola para disputar combates contra una CPU controlada por IA.
 
-## Fase 1.b: Servidor API Local e Interfaz Web en React
+## Fase 1.b: Servidor API Local e Interfaz Web en React [COMPLETADA]
 * **Objetivo:** Facilitar la lectura de la información, estados de los personajes y resultados del combate mediante una interfaz de usuario web altamente estética e interactiva.
 * **Componentes clave:**
   * **Servidor Express backend:** Servidor HTTP local en Node.js para servir el frontend React compilado y exponer las rutas REST del juego.
@@ -41,12 +41,13 @@ graph TD
   * **Base de Datos Persistente:** Configuración de **PostgreSQL** (con Prisma ORM) para almacenar perfiles de usuario, el histórico de combates y las fichas de los personajes (acumulando el stat de Confianza).
   * **Matchmaking Básico:** Cola de espera para emparejar a dos jugadores activos en una sala de combate privada 1v1.
 
-## Fase 3: Mapas Estructurados, Equipamiento y Draft
-* **Objetivo:** Profundizar en la estrategia pre-combate y la influencia táctica del entorno.
+## Fase 3: Mapas Estructurados, Equipamiento (Boosters) y Draft [COMPLETADA]
+* **Objetivo:** Profundizar en la estrategia pre-combate y la influencia táctica del entorno mediante equipamiento con límites de uso.
 * **Componentes clave:**
-  * **Sistema de Mapas Avanzado:** Base de datos con múltiples escenarios con tags de entorno dinámicos (ej: *terreno_resbaladizo*, *conductores_electricos*).
-  * **Sistema de Inventario:** Armas (cuerpo a cuerpo y rango) y armaduras con propiedades lógicas (ej: *Botas de Fango* que anulan penalizaciones de mapas de pantano).
-  * **Fase de Draft (Preparación):** Revelado del mapa de combate y un temporizador de 1 minuto para que los jugadores seleccionen su equipamiento en base a los stats modificados y ventajas tácticas del escenario.
+  * **Sistema de Mapas Avanzado:** Catálogo de 5 escenarios con modificadores de atributos y tags de entorno dinámicos (Coliseo, Pantano, Fábrica, Desierto y Gravedad Cero).
+  * **Sistema de Boosters (Equipamiento):** Inventario de 20 boosters divididos en Armas (activas por ataque), Partes de Armadura (cabeza, torso, brazos y piernas; pasivas que absorben daño y pierden golpes) y Herramientas (activas que curan, alteran estadísticas o confianza).
+  * **Fase de Draft (Preparación):** Revelado del mapa de combate y fase de preparación de 1 minuto para que los operadores seleccionen hasta 3 boosters óptimos para la sinergia con el escenario.
+
 
 ## Fase 4: Combate Grupal (2v2, 5v5) y Audio/Voz Bidireccional
 * **Objetivo:** Escalar el juego a batallas tácticas de equipos e introducir una forma de comunicación más natural e inmersiva.

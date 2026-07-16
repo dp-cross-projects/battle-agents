@@ -50,6 +50,20 @@ export interface InitiativeRoll {
   total: number;
 }
 
+export type BoosterType = 'weapon' | 'head' | 'torso' | 'arms' | 'legs' | 'tool';
+
+export interface Booster {
+  id: string;
+  name: string;
+  type: BoosterType;
+  description: string;
+  durability: number;        // Max uses / hits
+  currentDurability: number; // Remaining uses / hits
+  statsModifiers?: Partial<AgentStats>;
+  damageAbsorption?: number;  // For armor parts
+  value?: number;            // For healing amount or stats boost value
+}
+
 export interface CombatRoundResult {
   initiatives: InitiativeRoll[];
   actions: {
@@ -61,4 +75,7 @@ export interface CombatRoundResult {
   };
   mathLog: string[];
   narrative: string;
+  p1Boosters?: Booster[];
+  p2Boosters?: Booster[];
 }
+

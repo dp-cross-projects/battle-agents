@@ -6,13 +6,14 @@ import {
   CombatRoundResult, 
   LLMActionResponse, 
   AgentStats, 
-  ActionType 
+  ActionType,
+  Booster
 } from '../types/index.js';
 
 export class CombatEngine {
   private llm: LLMProvider;
 
-  // The 3 maps defined for Phase 1
+  // The 5 maps defined for Phase 3
   public static readonly MAPS: MapScenario[] = [
     {
       name: 'Coliseo de Acero',
@@ -31,6 +32,18 @@ export class CombatEngine {
       statsModifiers: { intelligence: 10, strength: 5, perception: -5 },
       tags: ['maquinaria', 'cobertura', 'sombras'],
       impactDescription: 'Mejora las tácticas tecnológicas e incrementa la fuerza con objetos de metal. La chatarra bloquea líneas de visión.'
+    },
+    {
+      name: 'Desierto Calcinante',
+      statsModifiers: { agility: -5, resilience: -5, perception: -5, strength: 10 },
+      tags: ['calor_extremo', 'tormenta_arena', 'abierto'],
+      impactDescription: 'El calor extremo agota la energía y desorienta, pero la adrenalina desértica desata golpes de fuerza brutales.'
+    },
+    {
+      name: 'Laboratorio de Gravedad Cero',
+      statsModifiers: { agility: 10, intelligence: 5, resilience: -10 },
+      tags: ['gravedad_cero', 'conductores_electricos', 'tecnologico'],
+      impactDescription: 'La falta de gravedad potencia la agilidad y las interacciones de hackeo, pero la fragilidad del entorno expone a recibir más daño.'
     }
   ];
 
@@ -55,17 +68,64 @@ export class CombatEngine {
   }
 
   /**
-   * Applies scenario modifiers to character base stats.
+   * Applies scenario and booster modifiers to character base stats.
    */
-  public getModifiedStats(agent: BattleAgent, map: MapScenario): AgentStats {
+  public getModifiedStats(
+    agent: BattleAgent, 
+    map: MapScenario, 
+    activeBooster?: Booster, 
+    allBoosters?: Booster[]
+  ): AgentStats {
     const s = agent.stats;
     const m = map.statsModifiers;
+
+    let bonusStrength = 0;
+    let bonusAgility = 0;
+    let bonusPerception = 0;
+    let bonusResilience = 0;
+    let bonusIntelligence = 0;
+
+    // Apply map modifiers (negate swamp agility penalty if espinilleras de fango is equipped and active)
+    let mapAgilityMod = m.agility || 0;
+    if (map.name === 'Pantano Neblinoso' && allBoosters) {
+      const hasFango = allBoosters.some(b => b.id === 'booster_espinilleras_fango' && b.currentDurability > 0);
+      if (hasFango) {
+        mapAgilityMod = 0; // Negate the -10 Agility penalty
+      }
+    }
+
+    // Apply passive boosters (armor parts that are not broken)
+    if (allBoosters) {
+      for (const b of allBoosters) {
+        if (b.currentDurability > 0 && b.type !== 'weapon' && b.type !== 'tool') {
+          if (b.statsModifiers) {
+            bonusStrength += b.statsModifiers.strength || 0;
+            bonusAgility += b.statsModifiers.agility || 0;
+            bonusPerception += b.statsModifiers.perception || 0;
+            bonusResilience += b.statsModifiers.resilience || 0;
+            bonusIntelligence += b.statsModifiers.intelligence || 0;
+          }
+        }
+      }
+    }
+
+    // Apply active booster (weapon or tool actively used in the current round)
+    if (activeBooster && activeBooster.currentDurability > 0) {
+      if (activeBooster.statsModifiers) {
+        bonusStrength += activeBooster.statsModifiers.strength || 0;
+        bonusAgility += activeBooster.statsModifiers.agility || 0;
+        bonusPerception += activeBooster.statsModifiers.perception || 0;
+        bonusResilience += activeBooster.statsModifiers.resilience || 0;
+        bonusIntelligence += activeBooster.statsModifiers.intelligence || 0;
+      }
+    }
+
     return {
-      strength: Math.max(5, s.strength + (m.strength || 0)),
-      agility: Math.max(5, s.agility + (m.agility || 0)),
-      perception: Math.max(5, s.perception + (m.perception || 0)),
-      resilience: Math.max(5, s.resilience + (m.resilience || 0)),
-      intelligence: Math.max(5, s.intelligence + (m.intelligence || 0)),
+      strength: Math.max(5, s.strength + (m.strength || 0) + bonusStrength),
+      agility: Math.max(5, s.agility + mapAgilityMod + bonusAgility),
+      perception: Math.max(5, s.perception + (m.perception || 0) + bonusPerception),
+      resilience: Math.max(5, s.resilience + (m.resilience || 0) + bonusResilience),
+      intelligence: Math.max(5, s.intelligence + (m.intelligence || 0) + bonusIntelligence),
     };
   }
 
@@ -76,7 +136,9 @@ export class CombatEngine {
     agent: BattleAgent, 
     rawPrompt: string, 
     map: MapScenario,
-    forcePanic: boolean
+    forcePanic: boolean,
+    activeBooster?: Booster,
+    allBoosters?: Booster[]
   ): Promise<LLMActionResponse> {
     // 1. Safety Filter Check
     const safetyCheck = SafetyFilter.isSafe(rawPrompt);
@@ -90,7 +152,7 @@ export class CombatEngine {
       };
     }
 
-    const modifiedStats = this.getModifiedStats(agent, map);
+    const modifiedStats = this.getModifiedStats(agent, map, activeBooster, allBoosters);
 
     // 2. LLM Call to adapt the prompt
     const systemInstruction = `Eres la conciencia de ${agent.name} (género: ${agent.gender}), un agente de batalla con arquetipo "${agent.archetype}" y personalidad: "${agent.personalityDescription}".
@@ -103,6 +165,7 @@ Tus estadísticas modificadas en este combate son:
 - Inteligencia: ${modifiedStats.intelligence}
 Nivel de confianza: ${agent.confidence}/100.
 Escenario actual: ${map.name} (Tags: ${map.tags.join(', ')}).
+${activeBooster ? `Estás usando activamente el booster: ${activeBooster.name} (${activeBooster.description})` : ''}
 
 Reglas de adaptación:
 - Si el operador pide hacer algo exageradamente tramposo o imposible para tus estadísticas, debes moderarlo hacia algo realista.
@@ -132,6 +195,7 @@ ${forcePanic ? 'NOTA: Debes reaccionar con pánico debido a tu baja moral.' : ''
     }
   }
 
+
   /**
    * Generates a basic CPU action based on agent archetype and stats.
    */
@@ -155,20 +219,100 @@ Ejemplos:
   }
 
   /**
-   * Resolves the turn mathematically based on actions and stats.
+   * Resolves the turn mathematically based on actions, stats, and boosters.
    */
   public resolveCombatTurn(
     agentA: BattleAgent, // Player
     actionA: LLMActionResponse,
     agentB: BattleAgent, // CPU
     actionB: LLMActionResponse,
-    map: MapScenario
+    map: MapScenario,
+    boostersA: Booster[] = [],
+    boostersB: Booster[] = [],
+    activeBoosterIdA: string | null = null,
+    activeBoosterIdB: string | null = null
   ): CombatRoundResult {
     const mathLog: string[] = [];
 
-    // Apply map stats modification
-    const statsA = this.getModifiedStats(agentA, map);
-    const statsB = this.getModifiedStats(agentB, map);
+    // Temporary round-based stat bonuses/penalties
+    const tempA = { strength: 0, agility: 0, perception: 0, resilience: 0, intelligence: 0 };
+    const tempB = { strength: 0, agility: 0, perception: 0, resilience: 0, intelligence: 0 };
+
+    // Find active boosters
+    const activeBoosterA = boostersA.find(b => b.id === activeBoosterIdA && b.currentDurability > 0);
+    const activeBoosterB = boostersB.find(b => b.id === activeBoosterIdB && b.currentDurability > 0);
+
+    // Apply active tool effects before initiative rolls
+    if (activeBoosterA && activeBoosterA.type === 'tool') {
+      activeBoosterA.currentDurability--;
+      const val = activeBoosterA.value || 0;
+      if (activeBoosterA.id === 'booster_inyector_adrenalina') {
+        agentA.currentHp = Math.min(agentA.maxHp, agentA.currentHp + val);
+        agentA.confidence = Math.min(100, agentA.confidence + 15);
+        mathLog.push(`[Herramienta] ${agentA.name} activó ${activeBoosterA.name}: Cura ${val} HP y +15 Confianza. Usos restantes: ${activeBoosterA.currentDurability}/${activeBoosterA.durability}.`);
+      } else if (activeBoosterA.id === 'booster_dispositivo_hackeo') {
+        tempA.intelligence += val;
+        agentB.confidence = Math.max(0, agentB.confidence - 10);
+        mathLog.push(`[Herramienta] ${agentA.name} activó ${activeBoosterA.name}: +${val} Inteligencia temporal y -10 Confianza al rival. Usos restantes: ${activeBoosterA.currentDurability}/${activeBoosterA.durability}.`);
+      } else if (activeBoosterA.id === 'booster_escudo_energia') {
+        tempA.resilience += val;
+        mathLog.push(`[Herramienta] ${agentA.name} activó ${activeBoosterA.name}: +${val} Resiliencia temporal. Usos restantes: ${activeBoosterA.currentDurability}/${activeBoosterA.durability}.`);
+      } else if (activeBoosterA.id === 'booster_granada_aturdidora') {
+        tempB.agility += val; // negative value (-15)
+        mathLog.push(`[Herramienta] ${agentA.name} lanzó ${activeBoosterA.name}: -15 Agilidad temporal al oponente. Usos restantes: ${activeBoosterA.currentDurability}/${activeBoosterA.durability}.`);
+      } else if (activeBoosterA.id === 'booster_bateria_respaldo') {
+        agentA.currentHp = Math.min(agentA.maxHp, agentA.currentHp + val);
+        tempA.strength += 5;
+        mathLog.push(`[Herramienta] ${agentA.name} activó ${activeBoosterA.name}: Cura ${val} HP y +5 Fuerza temporal. Usos restantes: ${activeBoosterA.currentDurability}/${activeBoosterA.durability}.`);
+      } else if (activeBoosterA.id === 'booster_proyector_holografico') {
+        tempA.agility += val;
+        mathLog.push(`[Herramienta] ${agentA.name} activó ${activeBoosterA.name}: +${val} Agilidad temporal. Usos restantes: ${activeBoosterA.currentDurability}/${activeBoosterA.durability}.`);
+      }
+    }
+
+    if (activeBoosterB && activeBoosterB.type === 'tool') {
+      activeBoosterB.currentDurability--;
+      const val = activeBoosterB.value || 0;
+      if (activeBoosterB.id === 'booster_inyector_adrenalina') {
+        agentB.currentHp = Math.min(agentB.maxHp, agentB.currentHp + val);
+        agentB.confidence = Math.min(100, agentB.confidence + 15);
+        mathLog.push(`[Herramienta] ${agentB.name} activó ${activeBoosterB.name}: Cura ${val} HP y +15 Confianza. Usos restantes: ${activeBoosterB.currentDurability}/${activeBoosterB.durability}.`);
+      } else if (activeBoosterB.id === 'booster_dispositivo_hackeo') {
+        tempB.intelligence += val;
+        agentA.confidence = Math.max(0, agentA.confidence - 10);
+        mathLog.push(`[Herramienta] ${agentB.name} activó ${activeBoosterB.name}: +${val} Inteligencia temporal y -10 Confianza al rival. Usos restantes: ${activeBoosterB.currentDurability}/${activeBoosterB.durability}.`);
+      } else if (activeBoosterB.id === 'booster_escudo_energia') {
+        tempB.resilience += val;
+        mathLog.push(`[Herramienta] ${agentB.name} activó ${activeBoosterB.name}: +${val} Resiliencia temporal. Usos restantes: ${activeBoosterB.currentDurability}/${activeBoosterB.durability}.`);
+      } else if (activeBoosterB.id === 'booster_granada_aturdidora') {
+        tempA.agility += val; // negative value (-15)
+        mathLog.push(`[Herramienta] ${agentB.name} lanzó ${activeBoosterB.name}: -15 Agilidad temporal al oponente. Usos restantes: ${activeBoosterB.currentDurability}/${activeBoosterB.durability}.`);
+      } else if (activeBoosterB.id === 'booster_bateria_respaldo') {
+        agentB.currentHp = Math.min(agentB.maxHp, agentB.currentHp + val);
+        tempB.strength += 5;
+        mathLog.push(`[Herramienta] ${agentB.name} activó ${activeBoosterB.name}: Cura ${val} HP y +5 Fuerza temporal. Usos restantes: ${activeBoosterB.currentDurability}/${activeBoosterB.durability}.`);
+      } else if (activeBoosterB.id === 'booster_proyector_holografico') {
+        tempB.agility += val;
+        mathLog.push(`[Herramienta] ${agentB.name} activó ${activeBoosterB.name}: +${val} Agilidad temporal. Usos restantes: ${activeBoosterB.currentDurability}/${activeBoosterB.durability}.`);
+      }
+    }
+
+    // Apply map stats modification + passives + actives
+    const statsA = this.getModifiedStats(agentA, map, activeBoosterA, boostersA);
+    const statsB = this.getModifiedStats(agentB, map, activeBoosterB, boostersB);
+
+    // Apply temporary round modifiers
+    statsA.strength = Math.max(5, statsA.strength + tempA.strength);
+    statsA.agility = Math.max(5, statsA.agility + tempA.agility);
+    statsA.perception = Math.max(5, statsA.perception + tempA.perception);
+    statsA.resilience = Math.max(5, statsA.resilience + tempA.resilience);
+    statsA.intelligence = Math.max(5, statsA.intelligence + tempA.intelligence);
+
+    statsB.strength = Math.max(5, statsB.strength + tempB.strength);
+    statsB.agility = Math.max(5, statsB.agility + tempB.agility);
+    statsB.perception = Math.max(5, statsB.perception + tempB.perception);
+    statsB.resilience = Math.max(5, statsB.resilience + tempB.resilience);
+    statsB.intelligence = Math.max(5, statsB.intelligence + tempB.intelligence);
 
     // Apply confidence modifiers
     agentA.confidence = Math.max(0, Math.min(100, agentA.confidence + actionA.confidence_modifier));
@@ -193,9 +337,15 @@ Ejemplos:
     ].sort((a, b) => b.total - a.total);
 
     // Determine target actions
-    const agentMap: Record<string, { agent: BattleAgent; action: LLMActionResponse; stats: AgentStats }> = {
-      [agentA.id]: { agent: agentA, action: actionA, stats: statsA },
-      [agentB.id]: { agent: agentB, action: actionB, stats: statsB }
+    const agentMap: Record<string, { 
+      agent: BattleAgent; 
+      action: LLMActionResponse; 
+      stats: AgentStats; 
+      activeBooster: Booster | undefined;
+      ownBoosters: Booster[];
+    }> = {
+      [agentA.id]: { agent: agentA, action: actionA, stats: statsA, activeBooster: activeBoosterA, ownBoosters: boostersA },
+      [agentB.id]: { agent: agentB, action: actionB, stats: statsB, activeBooster: activeBoosterB, ownBoosters: boostersB }
     };
 
     // Execute turns in initiative order
@@ -203,8 +353,8 @@ Ejemplos:
       const attackerId = initUnit.agentId;
       const defenderId = attackerId === agentA.id ? agentB.id : agentA.id;
 
-      const { agent: attacker, action: attackAction, stats: aStats } = agentMap[attackerId];
-      const { agent: defender, action: defendAction, stats: dStats } = agentMap[defenderId];
+      const { agent: attacker, action: attackAction, stats: aStats, activeBooster: aBooster } = agentMap[attackerId];
+      const { agent: defender, action: defendAction, stats: dStats, ownBoosters: defBoosters } = agentMap[defenderId];
 
       if (attacker.currentHp <= 0) {
         mathLog.push(`${attacker.name} está fuera de combate y no puede actuar.`);
@@ -220,7 +370,6 @@ Ejemplos:
 
       if (actionType === 'panic') {
         mathLog.push(`${attacker.name} está preso del pánico, huye buscando cobertura y no ataca.`);
-        // Lowers confidence but might increase dodge chance
         continue;
       }
 
@@ -237,6 +386,27 @@ Ejemplos:
       const defenseBonus = defendAction.action_type === 'dodge' ? 15 : 0;
       const resilienceMultiplier = defendAction.action_type === 'defend' ? 2 : 1;
 
+      // Check active weapon booster use
+      let weaponDmgBonus = 0;
+      if (aBooster && aBooster.type === 'weapon' && aBooster.currentDurability > 0) {
+        // Enforce matching weapon type
+        const isMeleeWeapon = ['booster_hoja_runica', 'booster_daga_vibratoria', 'booster_martillo_impulso'].includes(aBooster.id);
+        const isRangedWeapon = ['booster_canon_plasma', 'booster_subfusil_tactico', 'booster_rifle_electrico'].includes(aBooster.id);
+
+        if ((actionType === 'melee_attack' && isMeleeWeapon) || 
+            (actionType === 'ranged_attack' && isRangedWeapon) || 
+            (actionType === 'tactical' && aBooster.id === 'booster_rifle_electrico')) {
+          aBooster.currentDurability--;
+          if (aBooster.id === 'booster_hoja_runica') weaponDmgBonus = 6;
+          else if (aBooster.id === 'booster_canon_plasma') weaponDmgBonus = 12;
+          else if (aBooster.id === 'booster_daga_vibratoria') weaponDmgBonus = 4;
+          else if (aBooster.id === 'booster_subfusil_tactico') weaponDmgBonus = 6;
+          else if (aBooster.id === 'booster_martillo_impulso') weaponDmgBonus = 10;
+          else if (aBooster.id === 'booster_rifle_electrico') weaponDmgBonus = 8;
+          mathLog.push(`[Arma] ${attacker.name} ataca usando ${aBooster.name} (+${weaponDmgBonus} Daño). Usos restantes: ${aBooster.currentDurability}/${aBooster.durability}.`);
+        }
+      }
+
       if (actionType === 'melee_attack') {
         hitChance = 60 + (aStats.strength * 2) - ((dStats.agility + defenseBonus) * 2);
         hitChance = Math.max(10, Math.min(95, hitChance));
@@ -250,7 +420,6 @@ Ejemplos:
         isHit = roll <= hitChance;
         mathLog.push(`Ataque Rango de ${attacker.name}: Precisión requerida <= ${hitChance}%. Sacó ${roll}%. ${isHit ? '¡IMPACTO!' : '¡FALLÓ!'}`);
       } else if (actionType === 'tactical') {
-        // Tactical bypasses armor/resilience but has lower precision
         hitChance = 55 + (aStats.intelligence * 2) - ((dStats.intelligence + defenseBonus) * 2);
         hitChance = Math.max(15, Math.min(90, hitChance));
         const roll = Math.floor(Math.random() * 100) + 1;
@@ -263,20 +432,35 @@ Ejemplos:
         let randomFactor = Math.floor(Math.random() * 6) + 1; // 1d6 for variability
 
         if (actionType === 'melee_attack') {
-          rawDamage = aStats.strength + randomFactor;
+          rawDamage = aStats.strength + randomFactor + weaponDmgBonus;
         } else if (actionType === 'ranged_attack') {
-          rawDamage = aStats.perception + randomFactor;
+          rawDamage = aStats.perception + randomFactor + weaponDmgBonus;
         } else if (actionType === 'tactical') {
-          rawDamage = Math.round(aStats.intelligence * 1.2) + randomFactor;
+          rawDamage = Math.round(aStats.intelligence * 1.2) + randomFactor + weaponDmgBonus;
         }
 
         // Apply resilience (reduced for tactical hack)
         const finalResilience = actionType === 'tactical' ? 0 : dStats.resilience * resilienceMultiplier;
         const damageReduction = Math.floor(finalResilience * 0.5);
-        const finalDamage = Math.max(1, rawDamage - damageReduction);
+
+        // Apply passive armor damage absorption
+        let armorAbsorption = 0;
+        const activeArmors = defBoosters.filter(b => b.currentDurability > 0 && b.type !== 'weapon' && b.type !== 'tool');
+        if (activeArmors.length > 0 && actionType !== 'tactical') {
+          armorAbsorption = activeArmors.reduce((sum, arm) => sum + (arm.damageAbsorption || 0), 0);
+          // Deduct 1 durability from the first active armor piece that contributed
+          const hitArmor = activeArmors[0];
+          hitArmor.currentDurability--;
+          mathLog.push(`[Armadura] La armadura de ${defender.name} (${hitArmor.name}) absorbió ${hitArmor.damageAbsorption} de daño. Golpes restantes: ${hitArmor.currentDurability}/${hitArmor.durability}.`);
+          if (hitArmor.currentDurability <= 0) {
+            mathLog.push(`[Armadura] ⚠️ ¡La pieza de armadura (${hitArmor.name}) de ${defender.name} ha sido destruida!`);
+          }
+        }
+
+        const finalDamage = Math.max(1, rawDamage - damageReduction - armorAbsorption);
 
         defender.currentHp = Math.max(0, defender.currentHp - finalDamage);
-        mathLog.push(`Daño: ${attacker.name} causó ${finalDamage} HP de daño a ${defender.name} (Base ${rawDamage} - Reducción ${damageReduction}). HP restante de ${defender.name}: ${defender.currentHp}/100.`);
+        mathLog.push(`Daño: ${attacker.name} causó ${finalDamage} HP de daño a ${defender.name} (Base ${rawDamage} - Reducción Resiliencia ${damageReduction} - Absorción Armadura ${armorAbsorption}). HP restante de ${defender.name}: ${defender.currentHp}/100.`);
 
         // Adjust confidence on success/failure
         attacker.confidence = Math.min(100, attacker.confidence + 5);
@@ -297,7 +481,9 @@ Ejemplos:
         [agentB.id]: { rawPrompt: actionB.adapted_prompt, adaptedAction: actionB, appliedStats: statsB }
       },
       mathLog,
-      narrative: '' // Will be generated in the next step
+      narrative: '', // Will be generated in the next step
+      p1Boosters: boostersA,
+      p2Boosters: boostersB
     };
   }
 

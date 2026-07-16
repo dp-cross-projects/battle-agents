@@ -1,24 +1,20 @@
-# Battle Agents - Fase 2 (Multijugador, Base de Datos y WebSockets)
+# Battle Agents - Fase 3 (Mapas, Equipamiento, Draft y WebSockets)
 
-Battle Agents es un videojuego de rol y estrategia táctica en tiempo real potenciado por Inteligencia Artificial. En esta **Fase 2**, el juego transiciona de un simulador local a un completo ecosistema online multijugador 1v1 en tiempo real. 
+Battle Agents es un videojuego de rol y estrategia táctica en tiempo real potenciado por Inteligencia Artificial. En esta **Fase 3**, el juego introduce una profunda capa estratégica de pre-combate añadiendo escenarios dinámicos y un catálogo de 20 equipamientos ("boosters") que se seleccionan bajo una fase de preparación (Draft).
 
-El sistema permite registrar operadores, crear y listar agentes de batalla persistentes guardados en base de datos PostgreSQL, unirse a colas de matchmaking automático, chatear con el oponente y acumular Confianza tras cada combate.
+El sistema permite registrar operadores, crear agentes autónomos persistentes con arquetipos y estadísticas, unirse a colas de matchmaking, planificar equipamientos según el mapa, chatear en tiempo real y guiar a tu agente usando prompts tácticos que la IA adapta y resuelve.
 
 ---
 
-## Características Implementadas (Fase 2)
+## Características Implementadas (Fase 3)
 
-1. **Autenticación de Operadores (Sesiones Seguras):** Registro e inicio de sesión seguro con cifrado de contraseñas nativo (`pbkdf2Sync`) y generación de tokens de acceso (`HMAC-SHA256`).
-2. **Base de Datos Relacional Persistente (Prisma ORM & PostgreSQL):**
-   - **Fichas Persistentes:** Creación de agentes de batalla en base de datos. Se almacena su nombre, género, arquetipo, estadísticas y su nivel de **Confianza** acumulativo.
-   - **Histórico de Combates:** Registro detallado de cada partida terminada, incluyendo número de rondas, mapas, participantes y la bitácora física de resolución.
-3. **Conexiones en Tiempo Real (Socket.io):**
-   - **Lobby Neural:** Conexión websocket autenticada por token de sesión.
-   - **Matchmaking 1v1:** Cola en memoria que empareja operadores disponibles, inicia una sala websocket privada y selecciona un escenario aleatorio.
-   - **Resolución Simultánea:** En PvP, el servidor espera las acciones de ambos operadores antes de ejecutar el turno matemático y la narración del LLM.
-   - **Chat del Operador:** Enlace de chat directo en tiempo real dentro de la arena de combate PvP.
-4. **Modo Práctica (vs CPU):** Se mantiene el modo original contra la CPU para que los operadores puedan entrenar a sus agentes de forma individual (los resultados de CPU también actualizan la confianza y guardan historial).
-5. **Ejecución Modernizada con TSX:** Reemplazo de `ts-node` por `tsx` para garantizar total compatibilidad con TypeScript 7 y Node.js 22.
+1. **Autenticación de Operadores (Sesiones Seguras):** Registro e inicio de sesión seguro con cifrado de contraseñas nativo (`pbkdf2Sync`) y firma de tokens de sesión HMAC-SHA256.
+2. **Base de Datos Relacional Persistente (Prisma ORM & PostgreSQL):** Guardado de fichas de agentes (Fuerza, Agilidad, Percepción, Resiliencia, Inteligencia y Confianza acumulativa) e historial completo de combates finalizados.
+3. **5 Escenarios con Influencia Táctica:** Los mapas (Coliseo, Pantano, Fábrica, Desierto, Gravedad Cero) aplican modificadores numéricos y tags de entorno que las fichas autónomas comprenden y aprovechan en la pelea.
+4. **Catálogo de 20 Boosters:** Equipamiento clasificado en Armas (activas de ataque con usos), Armaduras (pasivas que mitigan daño con golpes limitados) y Herramientas (dispositivos de un solo uso por ronda para sanación o aturdimiento).
+5. **Fase de Draft (Preparación):** Una vez emparejados, los operadores ven el mapa y disponen de 60 segundos para seleccionar hasta 3 boosters óptimos para anular penalizaciones de entorno o potenciar sus habilidades.
+6. **Conexiones en Tiempo Real (Socket.io):** Matchmaking online 1v1, chat de combate integrado y envío simultáneo de turnos de combate.
+7. **Modo Práctica (vs CPU):** Combates de entrenamiento contra la CPU, donde el contrincante inteligente escoge y utiliza boosters automáticamente para simular un reto realista.
 
 ---
 
@@ -29,8 +25,9 @@ El sistema permite registrar operadores, crear y listar agentes de batalla persi
 │   └── schema.prisma        # Modelos de base de datos (User, Agent, Combat)
 ├── src/                     # Backend (TypeScript)
 │   ├── core/
+│   │   ├── Boosters.ts          # Catálogo de 20 boosters de equipamiento
 │   │   ├── CharacterCreator.ts  # Creador de agentes por IA
-│   │   ├── CombatEngine.ts      # Resolución matemática y narrativa
+│   │   ├── CombatEngine.ts      # Resolución matemática y narrativa con mapas y boosters
 │   │   └── SafetyFilter.ts      # Filtro de palabras (+18)
 │   ├── providers/
 │   │   ├── LLMProvider.ts       # Proveedor de IA común
@@ -123,6 +120,11 @@ Para levantar el entorno completo de desarrollo:
 3. Regístrate e inicia sesión con dos operadores diferentes (ej: `OperadorA` y `OperadorB`).
 4. En cada panel de control, crea tu propio agente de batalla ingresando una descripción (ej: *"Un paladín de acero pesado"*).
 5. Selecciona el agente creado y haz clic en **BUSCAR PARTIDA ONLINE** en ambas ventanas.
-6. El matchmaking las emparejará y se cargará la arena en el mismo escenario.
-7. Comunícate con tu rival usando la pestaña de **CHAT DE OPERADORES**.
-8. Escribe órdenes narrativas para tus agentes en cada ventana y presiona **TRANSMITIR ORDEN**. Una vez que ambos hayan transmitido, se calculará el resultado de la ronda y se mostrará la narración épica en tiempo real.
+6. El matchmaking las emparejará y abrirá la pantalla de **DRAFT DE BOOSTERS**, revelando el escenario seleccionado aleatoriamente (con sus correspondientes modificadores numéricos y tags).
+7. Selecciona hasta 3 boosters estratégicos (armas, armaduras y herramientas) que tengan sinergia con tu agente o con el entorno, y presiona **Confirmar Equipamiento**.
+8. Una vez que ambos operadores hayan confirmado, la interfaz transicionará a la **Arena de Combate**, mostrando los boosters equipados debajo de las tarjetas de HP.
+9. Durante cada turno de combate:
+   - Puedes hacer clic en cualquiera de tus boosters de tipo arma o herramienta para seleccionarlo como "booster activo" de la ronda (se marcará con un borde de neón cian).
+   - Escribe tu orden narrativa en el cuadro de texto y presiona **TRANSMITIR ORDEN**.
+   - Tras el envío simultáneo, el motor de combate resolverá la ronda aplicando durabilidad y modificadores, y la IA narrará el combate en tiempo real.
+

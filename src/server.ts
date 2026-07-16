@@ -10,7 +10,9 @@ import { OllamaProvider } from './providers/OllamaProvider.js';
 import { CharacterCreator } from './core/CharacterCreator.js';
 import { CombatEngine } from './core/CombatEngine.js';
 import { CONFIG } from './config.js';
-import { BattleAgent, MapScenario } from './types/index.js';
+import { BattleAgent, MapScenario, Booster } from './types/index.js';
+import { BOOSTERS_DATABASE, createBoosterInstance } from './core/Boosters.js';
+
 
 const app = express();
 app.use(express.json());
@@ -182,6 +184,8 @@ interface CPUCombatSession {
   round: number;
   mathLogs: string[];
   narratives: string[];
+  playerBoosters: Booster[];
+  cpuBoosters: Booster[];
 }
 
 let activeCPUSessions: Record<string, CPUCombatSession> = {};
@@ -190,8 +194,13 @@ app.get('/api/maps', (req, res) => {
   res.json(CombatEngine.MAPS);
 });
 
+app.get('/api/boosters', (req, res) => {
+  res.json(BOOSTERS_DATABASE);
+});
+
+
 app.post('/api/combat/start', authenticateToken, async (req: any, res) => {
-  const { playerAgentId, mapName } = req.body;
+  const { playerAgentId, mapName, draftedBoosterIds } = req.body;
   if (!playerAgentId || !mapName) {
     return res.status(400).json({ error: 'Faltan parámetros para iniciar el combate.' });
   }
@@ -210,6 +219,15 @@ app.post('/api/combat/start', authenticateToken, async (req: any, res) => {
       return res.status(400).json({ error: 'El mapa seleccionado no es válido.' });
     }
 
+    // Process player selected boosters
+    const playerBoosters: Booster[] = [];
+    if (Array.isArray(draftedBoosterIds)) {
+      for (const id of draftedBoosterIds.slice(0, 3)) {
+        const inst = createBoosterInstance(id);
+        if (inst) playerBoosters.push(inst);
+      }
+    }
+
     // Auto-generate enemy CPU character
     if (!creator) {
       return res.status(500).json({ error: 'El generador de personajes no está disponible.' });
@@ -222,6 +240,14 @@ app.post('/api/combat/start', authenticateToken, async (req: any, res) => {
     const cpuPrompt = cpuPrompts[Math.floor(Math.random() * cpuPrompts.length)];
     const cpuAgent = await creator.createCharacter(cpuPrompt);
 
+    // Randomly select 3 boosters for CPU
+    const cpuBoosters: Booster[] = [];
+    const shuffledDb = [...BOOSTERS_DATABASE].sort(() => 0.5 - Math.random());
+    for (const b of shuffledDb.slice(0, 3)) {
+      const inst = createBoosterInstance(b.id);
+      if (inst) cpuBoosters.push(inst);
+    }
+
     activeCPUSessions[req.userId] = {
       userId: req.userId,
       dbPlayerAgentId: playerAgentId,
@@ -230,11 +256,13 @@ app.post('/api/combat/start', authenticateToken, async (req: any, res) => {
       map,
       round: 1,
       mathLogs: [],
-      narratives: [`Combate iniciado en el escenario: ${map.name}. ${map.impactDescription}`]
+      narratives: [`Combate iniciado en el escenario: ${map.name}. ${map.impactDescription}`],
+      playerBoosters,
+      cpuBoosters
     };
 
     console.log(`[API CPU] Combate iniciado para usuario ${req.userId}: ${playerAgent.name} vs CPU ${cpuAgent.name} en ${mapName}`);
-    res.json({ success: true, playerAgent, cpuAgent, map });
+    res.json({ success: true, playerAgent, cpuAgent, map, playerBoosters, cpuBoosters });
   } catch (error: any) {
     console.error('[API Error] Falló el inicio de combate CPU:', error);
     res.status(500).json({ error: error.message || 'Error al iniciar combate.' });
@@ -247,7 +275,7 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
     return res.status(400).json({ error: 'No hay combate CPU activo o el motor no está configurado.' });
   }
 
-  const { actionPrompt } = req.body;
+  const { actionPrompt, activeBoosterId } = req.body;
   if (!actionPrompt) {
     return res.status(400).json({ error: 'Falta la acción del jugador.' });
   }
@@ -255,13 +283,50 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
   try {
     const cpuPrompt = await engine.generateCPUPrompt(session.cpuAgent, session.playerAgent);
 
+    // Decide CPU active booster
+    let cpuActiveBoosterId: string | null = null;
+    const cpuActiveTools = session.cpuBoosters.filter(b => b.currentDurability > 0 && b.type === 'tool');
+    const cpuActiveWeapons = session.cpuBoosters.filter(b => b.currentDurability > 0 && b.type === 'weapon');
+
+    if (session.cpuAgent.currentHp < 45 && cpuActiveTools.length > 0) {
+      // Prioritize healing tools if low HP
+      const healTool = cpuActiveTools.find(t => ['booster_inyector_adrenalina', 'booster_bateria_respaldo'].includes(t.id));
+      if (healTool) {
+        cpuActiveBoosterId = healTool.id;
+      }
+    }
+
+    if (!cpuActiveBoosterId && cpuActiveWeapons.length > 0 && Math.random() < 0.7) {
+      // 70% chance to use weapon if available
+      cpuActiveBoosterId = cpuActiveWeapons[0].id;
+    }
+
+    if (!cpuActiveBoosterId && cpuActiveTools.length > 0 && Math.random() < 0.4) {
+      // 40% chance to use other tools
+      cpuActiveBoosterId = cpuActiveTools[0].id;
+    }
+
     const playerPanic = session.playerAgent.confidence < 30 && Math.random() < 0.15;
     const cpuPanic = session.cpuAgent.confidence < 30 && Math.random() < 0.15;
 
-    const actionA = await engine.filterAgentAction(session.playerAgent, actionPrompt, session.map, playerPanic);
-    const actionB = await engine.filterAgentAction(session.cpuAgent, cpuPrompt, session.map, cpuPanic);
+    const playerActiveBooster = session.playerBoosters.find(b => b.id === activeBoosterId && b.currentDurability > 0);
+    const cpuActiveBooster = session.cpuBoosters.find(b => b.id === cpuActiveBoosterId && b.currentDurability > 0);
 
-    const roundResult = engine.resolveCombatTurn(session.playerAgent, actionA, session.cpuAgent, actionB, session.map);
+    const actionA = await engine.filterAgentAction(session.playerAgent, actionPrompt, session.map, playerPanic, playerActiveBooster, session.playerBoosters);
+    const actionB = await engine.filterAgentAction(session.cpuAgent, cpuPrompt, session.map, cpuPanic, cpuActiveBooster, session.cpuBoosters);
+
+    const roundResult = engine.resolveCombatTurn(
+      session.playerAgent, 
+      actionA, 
+      session.cpuAgent, 
+      actionB, 
+      session.map,
+      session.playerBoosters,
+      session.cpuBoosters,
+      activeBoosterId || null,
+      cpuActiveBoosterId
+    );
+    
     const narrative = await engine.generateNarrative(session.playerAgent, session.cpuAgent, roundResult, session.map);
     roundResult.narrative = narrative;
 
@@ -293,9 +358,6 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
       });
 
       // 2. Save combat in history
-      // (CPU is treated as dummy user or we can match player2Id to a mock/null ID)
-      // Since schema enforces User relationship, we will relate player2 to player1 itself or create a system user.
-      // Alternatively, we can let player2Id = player1Id for CPU combat, representing solo practice.
       await prisma.combat.create({
         data: {
           mapName: session.map.name,
@@ -303,8 +365,8 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
           mathLog: session.mathLogs.join('\n'),
           player1Id: session.userId,
           agent1Id: session.dbPlayerAgentId,
-          player2Id: session.userId, // Practice mode uses same user as player2
-          agent2Id: session.dbPlayerAgentId, // dummy reference
+          player2Id: session.userId,
+          agent2Id: session.dbPlayerAgentId,
           winnerId: winner === 'player' ? session.userId : null,
         },
       });
@@ -318,13 +380,16 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
       playerAgent: session.playerAgent,
       cpuAgent: session.cpuAgent,
       finished,
-      winner
+      winner,
+      playerBoosters: session.playerBoosters,
+      cpuBoosters: session.cpuBoosters
     });
   } catch (error: any) {
     console.error('[API Error] Falló la ronda CPU:', error);
     res.status(500).json({ error: error.message || 'Error en la resolución del turno.' });
   }
 });
+
 
 // ==========================================
 // SERVE STATIC CLIENT
@@ -364,12 +429,16 @@ interface PvPCombatSession {
   id: string;
   map: MapScenario;
   round: number;
+  draftPhase: boolean;
   p1: {
     userId: string;
     socketId: string;
     dbAgentId: string;
     agent: BattleAgent;
     action: string | null;
+    activeBoosterId: string | null;
+    boosters: Booster[];
+    draftConfirmed: boolean;
   };
   p2: {
     userId: string;
@@ -377,10 +446,14 @@ interface PvPCombatSession {
     dbAgentId: string;
     agent: BattleAgent;
     action: string | null;
+    activeBoosterId: string | null;
+    boosters: Booster[];
+    draftConfirmed: boolean;
   };
   mathLogs: string[];
   narratives: string[];
 }
+
 
 let matchmakingQueue: QueuedPlayer[] = [];
 let activePvPCombats = new Map<string, PvPCombatSession>();
@@ -437,7 +510,47 @@ io.on('connection', (socket) => {
     console.log(`[Matchmaking] Usuario ${userId} abandonó la cola.`);
   });
 
-  socket.on('submit_action', async ({ combatId, actionPrompt }) => {
+  socket.on('submit_draft', ({ combatId, draftedBoosterIds }) => {
+    const combat = activePvPCombats.get(combatId);
+    if (!combat) return socket.emit('error_msg', 'El combate no existe.');
+
+    const isP1 = combat.p1.userId === userId;
+    const isP2 = combat.p2.userId === userId;
+    if (!isP1 && !isP2) return socket.emit('error_msg', 'No participas en este combate.');
+
+    const boosters: Booster[] = [];
+    if (Array.isArray(draftedBoosterIds)) {
+      for (const id of draftedBoosterIds.slice(0, 3)) {
+        const inst = createBoosterInstance(id);
+        if (inst) boosters.push(inst);
+      }
+    }
+
+    if (isP1) {
+      combat.p1.boosters = boosters;
+      combat.p1.draftConfirmed = true;
+    } else {
+      combat.p2.boosters = boosters;
+      combat.p2.draftConfirmed = true;
+    }
+
+    const roomName = `room-${combatId}`;
+    io.to(roomName).emit('player_draft_status', {
+      p1Ready: combat.p1.draftConfirmed,
+      p2Ready: combat.p2.draftConfirmed,
+    });
+
+    if (combat.p1.draftConfirmed && combat.p2.draftConfirmed) {
+      combat.draftPhase = false;
+      io.to(roomName).emit('draft_completed', {
+        p1Boosters: combat.p1.boosters,
+        p2Boosters: combat.p2.boosters,
+      });
+      console.log(`[PvP Draft] Draft completado para combate ${combatId}`);
+    }
+  });
+
+  socket.on('submit_action', async ({ combatId, actionPrompt, activeBoosterId }) => {
     const combat = activePvPCombats.get(combatId);
     if (!combat) {
       return socket.emit('error_msg', 'El combate no existe o ya ha terminado.');
@@ -456,8 +569,10 @@ io.on('connection', (socket) => {
 
     if (isP1) {
       combat.p1.action = actionPrompt;
+      combat.p1.activeBoosterId = activeBoosterId || null;
     } else {
       combat.p2.action = actionPrompt;
+      combat.p2.activeBoosterId = activeBoosterId || null;
     }
 
     // Inform other player that action was submitted (for UI "ready" indicator)
@@ -543,12 +658,16 @@ async function checkAndMatchPlayers() {
       id: combatId,
       map,
       round: 1,
+      draftPhase: true,
       p1: {
         userId: player1Info.userId,
         socketId: player1Info.socketId,
         dbAgentId: player1Info.agentId,
         agent: agent1,
         action: null,
+        activeBoosterId: null,
+        boosters: [],
+        draftConfirmed: false,
       },
       p2: {
         userId: player2Info.userId,
@@ -556,6 +675,9 @@ async function checkAndMatchPlayers() {
         dbAgentId: player2Info.agentId,
         agent: agent2,
         action: null,
+        activeBoosterId: null,
+        boosters: [],
+        draftConfirmed: false,
       },
       mathLogs: [],
       narratives: [`Combate iniciado en el escenario: ${map.name}. ${map.impactDescription}`],
@@ -590,12 +712,25 @@ async function resolvePvPRound(combat: PvPCombatSession) {
     const player1Panic = combat.p1.agent.confidence < 30 && Math.random() < 0.15;
     const player2Panic = combat.p2.agent.confidence < 30 && Math.random() < 0.15;
 
+    const player1ActiveBooster = combat.p1.boosters.find(b => b.id === combat.p1.activeBoosterId && b.currentDurability > 0);
+    const player2ActiveBooster = combat.p2.boosters.find(b => b.id === combat.p2.activeBoosterId && b.currentDurability > 0);
+
     // Filter both actions
-    const actionA = await engine.filterAgentAction(combat.p1.agent, combat.p1.action!, combat.map, player1Panic);
-    const actionB = await engine.filterAgentAction(combat.p2.agent, combat.p2.action!, combat.map, player2Panic);
+    const actionA = await engine.filterAgentAction(combat.p1.agent, combat.p1.action!, combat.map, player1Panic, player1ActiveBooster, combat.p1.boosters);
+    const actionB = await engine.filterAgentAction(combat.p2.agent, combat.p2.action!, combat.map, player2Panic, player2ActiveBooster, combat.p2.boosters);
 
     // Resolve mechanics
-    const roundResult = engine.resolveCombatTurn(combat.p1.agent, actionA, combat.p2.agent, actionB, combat.map);
+    const roundResult = engine.resolveCombatTurn(
+      combat.p1.agent, 
+      actionA, 
+      combat.p2.agent, 
+      actionB, 
+      combat.map,
+      combat.p1.boosters,
+      combat.p2.boosters,
+      combat.p1.activeBoosterId,
+      combat.p2.activeBoosterId
+    );
 
     // Generate narrative
     const narrative = await engine.generateNarrative(combat.p1.agent, combat.p2.agent, roundResult, combat.map);
@@ -604,9 +739,11 @@ async function resolvePvPRound(combat: PvPCombatSession) {
     combat.mathLogs.push(...roundResult.mathLog, '---');
     combat.narratives.push(narrative);
 
-    // Reset actions
+    // Reset actions and active booster selections
     combat.p1.action = null;
     combat.p2.action = null;
+    combat.p1.activeBoosterId = null;
+    combat.p2.activeBoosterId = null;
 
     let finished = false;
     let winnerId: string | null = null;
@@ -668,11 +805,14 @@ async function resolvePvPRound(combat: PvPCombatSession) {
       finished,
       winnerKey,
       winnerId,
+      p1Boosters: combat.p1.boosters,
+      p2Boosters: combat.p2.boosters
     });
   } catch (error: any) {
     console.error('[PvP Error] Falló al resolver turno PvP:', error);
     io.to(roomName).emit('error_msg', 'Ocurrió un error al procesar el turno del combate.');
   }
+
 }
 
 // Start Server

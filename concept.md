@@ -58,13 +58,15 @@ Las fichas son plenamente conscientes del mapa. Si el terreno tiene el tag `terr
 
 ---
 
-## 5. Equipamiento y Herramientas Contextuales
+## 5. Equipamiento y Herramientas Contextuales (Boosters)
 
-Los objetos y armas no se limitan a otorgar bonificadores planos de daño (ej: `+5 de Ataque`). Poseen **propiedades lógicas y contextuales**.
+Los objetos no se limitan a otorgar bonificadores planos de daño. El juego utiliza **Boosters** que los operadores seleccionan durante el Draft, con límites estrictos de usos o golpes:
 
-* **Interacción con Mapas:** Un *Bláster de Plasma* funciona de manera óptima en espacios abiertos, pero en el mapa *Pantano Neblinoso* (alta humedad), el servidor aplicará una probabilidad de sobrecalentamiento o disipación del disparo por la niebla.
-* **Contrarrestar Penalizaciones:** Unas *Botas Impermeables* pueden anular por completo la penalización de agilidad del fango en el pantano, otorgando una ventaja táctica inmediata contra un enemigo sin el equipamiento adecuado.
-* **Fase de Preparación (Draft):** Antes de iniciar el combate, los jugadores conocen el mapa seleccionado y disponen de un tiempo limitado (ej: 1 minuto) para armar su inventario de herramientas y armas adecuadas para la situación.
+* **Armas (Activas)**: Otorgan modificadores ofensivos y de precisión. Consumen 1 carga/uso por ronda de ataque.
+* **Partes de Armadura (Pasivas - Cabeza, Torso, Brazos, Piernas)**: Otorgan estadísticas pasivas de aguante/agilidad y absorción plana de daño. Cada vez que el agente recibe daño, una pieza de armadura pierde 1 durabilidad (golpe) hasta destruirse.
+* **Herramientas (Activas)**: Curan vida, cargan energía, otorgan bufos masivos por una ronda o aturden al oponente drenando su confianza. Consumen 1 carga por activación manual.
+* **Fase de Preparación (Draft)**: Revelado el mapa de combate, los jugadores disponen de un temporizador de 1 minuto para seleccionar hasta 3 boosters óptimos para contrarrestar penalizaciones del entorno (p. ej. las *Espinilleras de Fango* que anulan la penalización de agilidad del Pantano).
+
 
 ---
 
