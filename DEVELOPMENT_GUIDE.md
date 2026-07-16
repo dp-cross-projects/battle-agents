@@ -1,6 +1,6 @@
-# Guía de Desarrollo y Especificación Técnica: Battle Agents (Fase 3)
+# Guía de Desarrollo y Especificación Técnica: Battle Agents (Fase 4)
 
-Este documento es la especificación técnica y guía de desarrollo de la **Fase 3** del videojuego "Battle Agents". Recopila la arquitectura multijugador y el motor de combate con soporte para 5 mapas dinámicos, el sistema de 20 boosters con límites de uso (usos/golpes), la fase de draft interactiva en tiempo real y la arena de combate PvP.
+Este documento es la especificación técnica y guía de desarrollo de la **Fase 4** del videojuego "Battle Agents". Recopila la arquitectura de audio y control por voz (STT/TTS) nativo en el cliente React, además de la arquitectura multijugador, el motor de combate con soporte para 5 mapas dinámicos, los boosters con límites de uso y la arena de combate PvP.
 
 ---
 
@@ -125,4 +125,26 @@ La Fase 3 añade una capa estratégica de preparación donde el mapa de combate 
 4. El servidor registra la confirmación de ese jugador y emite `player_draft_status` a la sala para actualizar los indicadores.
 5. Cuando ambos jugadores han confirmado, el servidor clona las instancias de los boosters, los asigna al jugador respectivo, desactiva `draftPhase` y emite `draft_completed` con los boosters resultantes.
 6. El cliente React recibe `draft_completed`, desactiva el bloqueo de combate (`isFighting = false`) y carga la pantalla `arena`.
+
+---
+
+## 7. Interacción de Audio y Voz Bidireccional (Fase 4)
+
+La Fase 4 integra interacción por voz nativa utilizando APIs web estándar para evitar costos de infraestructura externa y demoras de red.
+
+### 7.1. Entrada de Voz (STT) y Envío Oculto
+- **API Utilizada**: `webkitSpeechRecognition`.
+- **Modo Neural (Voz)**: Al activar el micrófono, la voz se transcribe en segundo plano y se transmite directamente mediante `executeActionSubmission(transcript)` sin mostrar el texto en pantalla.
+- **Temporizador Visual de 10s**: Una barra de carga animada por CSS Keyframes se despliega mientras `isListening === true`. Un `setTimeout` detiene la captura automáticamente a los 10 segundos exactos.
+- **Modo Texto Manual**: El usuario puede alternar a la consola de texto para escribir y transmitir órdenes si no dispone de micrófono o prefiere escritura clásica.
+
+### 7.2. Síntesis de Respuestas (TTS) del Agente
+- **API Utilizada**: `window.speechSynthesis`.
+- **Filtro de Voz del Operador**: Para evitar confusión auditiva, solo se sintetiza e interpreta el diálogo de reacción del agente del jugador (`verbal_reaction`), ignorando la respuesta del oponente.
+- **Personalidad por Arquetipo**:
+  - `cobarde_sarcastico`: Pitch agudo (1.25) y habla rápida (1.15).
+  - `paladin_orgulloso`: Pitch grave (0.85) y habla pausada/solemne (0.90).
+  - `ansioso_inseguro`: Pitch tembloroso (1.15) y habla muy rápida (1.35).
+  - `guerrero_pragmatico`: Parámetros neutros estándar.
+- **Mapeo de Género**: El sistema filtra voces locales en idioma español que contengan indicios masculinos o femeninos para adecuarse al género del personaje.
 

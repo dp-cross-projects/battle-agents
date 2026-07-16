@@ -1,12 +1,10 @@
-# Battle Agents - Fase 3 (Mapas, Equipamiento, Draft y WebSockets)
+# Battle Agents - Fase 4 (Audio/Voz Bidireccional, Mapas, Equipamiento y WebSockets)
 
-Battle Agents es un videojuego de rol y estrategia táctica en tiempo real potenciado por Inteligencia Artificial. En esta **Fase 3**, el juego introduce una profunda capa estratégica de pre-combate añadiendo escenarios dinámicos y un catálogo de 20 equipamientos ("boosters") que se seleccionan bajo una fase de preparación (Draft).
-
-El sistema permite registrar operadores, crear agentes autónomos persistentes con arquetipos y estadísticas, unirse a colas de matchmaking, planificar equipamientos según el mapa, chatear en tiempo real y guiar a tu agente usando prompts tácticos que la IA adapta y resuelve.
+Battle Agents es un videojuego de rol y estrategia táctica en tiempo real potenciado por Inteligencia Artificial. En esta **Fase 4**, el juego da un salto inmersivo incorporando control por voz en tiempo real y síntesis de voz personalizada para dotar de voz física a los diálogos y reacciones de tus agentes según su personalidad.
 
 ---
 
-## Características Implementadas (Fase 3)
+## Características Implementadas (Fase 4)
 
 1. **Autenticación de Operadores (Sesiones Seguras):** Registro e inicio de sesión seguro con cifrado de contraseñas nativo (`pbkdf2Sync`) y firma de tokens de sesión HMAC-SHA256.
 2. **Base de Datos Relacional Persistente (Prisma ORM & PostgreSQL):** Guardado de fichas de agentes (Fuerza, Agilidad, Percepción, Resiliencia, Inteligencia y Confianza acumulativa) e historial completo de combates finalizados.
@@ -15,6 +13,8 @@ El sistema permite registrar operadores, crear agentes autónomos persistentes c
 5. **Fase de Draft (Preparación):** Una vez emparejados, los operadores ven el mapa y disponen de 60 segundos para seleccionar hasta 3 boosters óptimos para anular penalizaciones de entorno o potenciar sus habilidades.
 6. **Conexiones en Tiempo Real (Socket.io):** Matchmaking online 1v1, chat de combate integrado y envío simultáneo de turnos de combate.
 7. **Modo Práctica (vs CPU):** Combates de entrenamiento contra la CPU, donde el contrincante inteligente escoge y utiliza boosters automáticamente para simular un reto realista.
+8. **Enlace Neural (Speech-to-Text Directo):** Interacción por voz nativa (Web Speech API) con temporizador visual no numérico de 10 segundos y transmisión oculta e instantánea al servidor.
+9. **Voces Dinámicas (Text-to-Speech de Agentes):** Síntesis de voz nativa del propio agente del jugador, adaptando el tono y velocidad a su género y arquetipo de personalidad (paladín, cobarde sarcástico, ansioso, etc.).
 
 ---
 

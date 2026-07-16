@@ -1,20 +1,26 @@
 # Diseño de Implementación: Fase 4 - Audio y Voz Bidireccional
 
-Este documento establece la arquitectura, especificaciones técnicas y la guía de desarrollo para implementar la **Fase 4** en **Battle Agents**. El objetivo es habilitar la interacción de voz bidireccional entre el operador (usuario) y los agentes de inteligencia artificial en combate.
+Este documento establece la arquitectura, especificaciones técnicas y la guía de desarrollo implementada para la **Fase 4** en **Battle Agents**. La Fase 4 habilita el dictado por voz de órdenes del operador (usuario) como opción prioritaria y la síntesis de voz de sus propios agentes con personalidad adaptada.
 
 ---
 
 ## 1. Objetivos del Sistema de Audio
 
-1. **Entrada de Voz (Speech-to-Text):** Permitir al operador dictar las órdenes de combate mediante su micrófono, transcribiendo automáticamente su voz a prompts de acción en el cliente web.
-2. **Salida de Voz (Text-to-Speech):** Dotar de voz física a las respuestas de diálogo (`verbal_reaction`) de los agentes, ajustando el tono, el ritmo y el género del audio en función del arquetipo de personalidad del personaje.
-3. **Sincronización en Tiempo Real:** Garantizar que la reproducción de voz ocurra simultáneamente al despliegue de las narrativas en el log del juego.
+1. **Entrada de Voz (Speech-to-Text) Prioritaria y Directa:** 
+   - El operador dicta las órdenes de combate a través del micrófono.
+   - El texto transcrito **no se muestra en pantalla** para simular una conexión mental real. Al detener la grabación (o transcurrir el tiempo límite), la orden se envía directamente al motor de combate.
+   - Duración de grabación acotada a un máximo de **10 segundos** con un **limitador visual no numérico** en tiempo real.
+   - Toggle para cambiar a modo de **Consola de Texto** manual si se prefiere usar teclado.
+2. **Salida de Voz (Text-to-Speech) Exclusiva del Operador:** 
+   - Reproducción física hablada de la respuesta verbal (`verbal_reaction`) del agente del jugador.
+   - La síntesis de voz se modula según el **género** del agente y su **arquetipo de personalidad** (cambiando tono y velocidad de habla).
+   - Se omite la voz del oponente/CPU para evitar ruidos cruzados y mantener el foco en la comunicación bidireccional entre el operador y su propio agente.
 
 ---
 
 ## 2. Flujo de Datos (Arquitectura)
 
-Para no interferir con las reglas, modificadores de mapas o boosters gestionados por el `CombatEngine` en el servidor, las APIs de audio se integran de manera modular sobre la conexión WebSocket existente:
+La entrada y salida de audio están integradas nativamente en el flujo del cliente React (`App.tsx`), interactuando de forma asíncrona con el backend mediante peticiones REST y WebSockets:
 
 ```mermaid
 sequenceDiagram
@@ -25,20 +31,18 @@ sequenceDiagram
     participant Gemini as Proveedor LLM (Gemini)
 
     Note over Operador,Client: Entrada de Audio (STT)
-    Operador->>Client: Activa micrófono y dicta orden ("¡Ataca con tu espada!")
-    Client->>Client: Procesa voz en tiempo real usando Web Speech API
-    Client->>Operador: Rellena caja de texto con la transcripción
-
+    Operador->>Client: Activa micrófono y dicta orden (Límite 10s con barra visual progresiva)
+    Client->>Client: Transcribe voz nativamente (Oculto en pantalla)
+    Client->>Server: socket.emit('submit_action', { actionPrompt: transcripcion_voz })
+    
     Note over Client,Server: Ciclo de Combate
-    Client->>Server: socket.emit('submit_action', { actionPrompt: "¡Ataca con tu espada!" })
-    Server->>Gemini: Genera resultado estructurado (ronda)
-    Gemini-->>Server: Retorna JSON { verbal_reaction, narrative, etc. }
-    Server-->>Client: socket.emit('round_completed', CombatRoundResult)
+    Server->>Gemini: Genera resultado de ronda (structured JSON)
+    Gemini-->>Server: Retorna JSON con { verbal_reaction, narrative, etc. }
+    Server-->>Client: socket.emit('round_result', CombatRoundResult)
 
     Note over Client,Operador: Salida de Audio (TTS)
-    Client->>Client: Identifica Arquetipo y Género del agente
-    Client->>Client: Genera voz con parámetros específicos (SpeechSynthesis)
-    Client->>Operador: Reproduce la reacción verbal hablada
+    Client->>Client: Valida Arquetipo/Género del propio agente
+    Client->>Operador: Sintetiza verbal_reaction usando window.speechSynthesis
 ```
 
 ---
@@ -47,126 +51,182 @@ sequenceDiagram
 
 | Enfoque | Descripción | Pros | Contras |
 | :--- | :--- | :--- | :--- |
-| **Opción A: Web Speech API (Nativo)** | Usa las capacidades integradas del navegador del usuario. | • Gratis.<br>• Latencia cero (<100ms).<br>• Sin dependencias de red adicionales. | • La calidad de la voz varía según el sistema operativo del usuario. |
-| **Opción B: APIs de Voz en la Nube (ElevenLabs / Whisper)** | Transcripción y síntesis mediante endpoints HTTP de terceros en el servidor. | • Calidad de voz ultra-realista / premium.<br>• Voces idénticas en cualquier dispositivo. | • Costo monetario por carácter/minuto.<br>• Añade latencia de red (1.5s - 2.5s). |
-| **Opción C: Gemini Multimodal Live API** | Conexión WebSocket directa de audio bidireccional con el modelo de Google. | • Experiencia conversacional fluida sin turnos rígidos. | • Requiere rediseñar el motor físico y de reglas del juego. |
-
-> [!NOTE]  
-> **Recomendación:** Implementar una **arquitectura híbrida progresiva**. La base del sistema se construirá sobre la **Opción A (Nativo)** para garantizar funcionalidad gratuita y de baja latencia. El diseño dejará preparados los conectores en el backend para poder activar la **Opción B (Voz Premium con ElevenLabs)** mediante variables de entorno en producción.
+| **Opción A: Web Speech API (Nativa) [IMPLEMENTADO]** | Utiliza el motor nativo del navegador del usuario. | • Gratis ($0).<br>• Latencia cero.<br>• Sin dependencias de red. | • La calidad de la voz varía según el sistema operativo del usuario. |
+| **Opción B: APIs de Voz en la Nube (ElevenLabs / Whisper)** | Transcripción y síntesis mediante endpoints HTTP externos de pago. | • Calidad de voz ultra-realista premium.<br>• Voces idénticas en cualquier dispositivo. | • Costo monetario por uso.<br>• Añade latencia de red (1.5s - 2.5s). |
+| **Opción C: Gemini Multimodal Live API** | Conexión WebSocket directa de audio bidireccional con el modelo de Google. | • Experiencia conversacional en tiempo real. | • Requiere omitir las reglas físicas estructuradas del motor. |
 
 ---
 
-## 4. Guía de Implementación Técnica
+## 4. Detalles de Implementación Técnica en `App.tsx`
 
-### 4.1. Entrada de Audio (Speech-to-Text) en React
-Añadiremos un botón de grabación en el panel de acciones que utilice `webkitSpeechRecognition` para rellenar el estado `playerActionPrompt` del cliente:
+### 4.1. Entrada de Audio y Envío Directo (STT)
+Cuando el usuario inicia la grabación de voz, se dibuja una barra de tiempo animada por CSS y se programa una auto-detención tras 10 segundos. Al recibir el resultado de voz, este se procesa e inmediatamente se transmite al motor:
 
 ```typescript
-// Componente de Reconocimiento de Voz
-export const startVoiceCapture = (
-  onResult: (text: string) => void,
-  onError: (err: string) => void,
-  onStateChange: (listening: boolean) => void
-) => {
+const startVoiceRecognition = () => {
+  if (isFighting || isProcessingVoice) return;
   const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    onError("El navegador no soporta reconocimiento de voz.");
-    return null;
+    setErrorMsg("El navegador no soporta reconocimiento de voz nativo.");
+    return;
   }
 
-  const recognition = new SpeechRecognition();
-  recognition.lang = 'es-ES';
-  recognition.interimResults = false;
-  recognition.continuous = false;
+  if (isListening) {
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    return;
+  }
 
-  recognition.onstart = () => onStateChange(true);
-  recognition.onend = () => onStateChange(false);
-  recognition.onerror = (event: any) => onError(`Error STT: ${event.error}`);
-  
-  recognition.onresult = (event: any) => {
-    const transcript = event.results[0][0].transcript;
-    onResult(transcript);
+  const rec = new SpeechRecognition();
+  rec.lang = 'es-ES';
+  rec.interimResults = false;
+  rec.continuous = false;
+
+  rec.onstart = () => {
+    setIsListening(true);
+    // Temporizador de 10s para detener la grabación automáticamente
+    recordingTimeoutRef.current = setTimeout(() => {
+      if (rec) {
+        rec.stop();
+      }
+    }, 10000);
   };
 
-  recognition.start();
-  return recognition;
+  rec.onend = () => {
+    setIsListening(false);
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+  };
+
+  rec.onerror = (e: any) => {
+    setIsListening(false);
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+  };
+
+  rec.onresult = async (event: any) => {
+    const transcript = event.results[0][0].transcript;
+    if (transcript && transcript.trim()) {
+      setIsProcessingVoice(true);
+      try {
+        // Envía el texto directamente sin escribirlo en un textarea
+        await executeActionSubmission(transcript);
+      } catch (err) {
+        console.error("Error al transmitir por voz:", err);
+      } finally {
+        setIsProcessingVoice(false);
+      }
+    }
+  };
+
+  recognitionRef.current = rec;
+  rec.start();
 };
 ```
 
-### 4.2. Salida de Audio (Text-to-Speech) Personalizada
-El sistema seleccionará parámetros de reproducción basados en el género y el arquetipo del agente.
+### 4.2. Barra Visual de Temporizador en CSS (`index.css`)
+Durante la grabación activa (`isListening`), se renderiza una barra cyberpunk que se llena de `0%` a `100%` a lo largo de los 10 segundos exactos utilizando CSS Keyframes:
+
+```css
+@keyframes recordTimer {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+.record-timer-bar {
+  animation: recordTimer 10s linear forwards;
+}
+```
+
+### 4.3. Salida de Audio Exclusiva del Operador (TTS)
+Se modulan las características de la voz nativa (`window.speechSynthesis`) para reflejar los rasgos del arquetipo del agente del usuario y se omite la reproducción del agente rival:
 
 ```typescript
-export const speakAgentReaction = (
-  text: string, 
-  gender: 'hombre' | 'mujer', 
-  archetype: 'cobarde_sarcastico' | 'paladin_orgulloso' | 'ansioso_inseguro' | 'guerrero_pragmatico'
-) => {
-  if (!('speechSynthesis' in window)) return;
+const speakText = (text: string, gender: 'hombre' | 'mujer', archetype: string): Promise<void> => {
+  return new Promise((resolve) => {
+    if (!isVoiceEnabled || !('speechSynthesis' in window) || !text) {
+      resolve();
+      return;
+    }
 
-  // Interrumpir cualquier voz en reproducción activa
-  window.speechSynthesis.cancel();
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'es-ES';
 
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'es-ES';
+    // Parámetros de voz según el arquetipo de personalidad
+    switch (archetype) {
+      case 'cobarde_sarcastico':
+        utterance.pitch = 1.25;  // Tono irónico
+        utterance.rate = 1.15;   // Rápido
+        break;
+      case 'paladin_orgulloso':
+        utterance.pitch = 0.85;  // Tono grave y serio
+        utterance.rate = 0.90;   // Pausado/Solemne
+        break;
+      case 'ansioso_inseguro':
+        utterance.pitch = 1.15;  // Tono nervioso
+        utterance.rate = 1.35;   // Habla acelerada
+        break;
+      case 'guerrero_pragmatico':
+      default:
+        utterance.pitch = 1.00;
+        utterance.rate = 1.05;
+    }
 
-  // Configuración de la voz según el arquetipo de personalidad
-  switch (archetype) {
-    case 'cobarde_sarcastico':
-      utterance.pitch = 1.25;  // Tono más agudo
-      utterance.rate = 1.15;   // Velocidad ligeramente rápida
-      break;
-    case 'paladin_orgulloso':
-      utterance.pitch = 0.85;  // Tono grave e imponente
-      utterance.rate = 0.90;   // Velocidad pausada/solemne
-      break;
-    case 'ansioso_inseguro':
-      utterance.pitch = 1.15;  // Tono nervioso
-      utterance.rate = 1.35;   // Habla acelerada
-      break;
-    case 'guerrero_pragmatico':
-    default:
-      utterance.pitch = 1.00;  // Tono neutro y directo
-      utterance.rate = 1.05;   // Velocidad estándar
-  }
+    const voices = window.speechSynthesis.getVoices();
+    const targetVoice = voices.find(v => {
+      const isSpanish = v.lang.startsWith('es');
+      const name = v.name.toLowerCase();
+      const isMale = name.includes('male') || name.includes('david') || name.includes('pablo') || !name.includes('helena');
+      const isFemale = name.includes('female') || name.includes('helena') || name.includes('sara');
+      
+      if (gender === 'hombre') return isSpanish && isMale;
+      return isSpanish && isFemale;
+    });
 
-  // Filtrar voces del sistema que coincidan con el género e idioma
-  const voices = window.speechSynthesis.getVoices();
-  const esVoice = voices.find(v => {
-    const isSpanish = v.lang.startsWith('es');
-    const name = v.name.toLowerCase();
-    
-    const isMale = name.includes('male') || name.includes('david') || name.includes('pablo') || name.includes('julio');
-    const isFemale = name.includes('female') || name.includes('helena') || name.includes('sara') || name.includes('zira');
-
-    if (gender === 'hombre') return isSpanish && isMale;
-    return isSpanish && isFemale;
+    if (targetVoice) utterance.voice = targetVoice;
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
   });
+};
 
-  if (esVoice) {
-    utterance.voice = esVoice;
+const triggerSequentialSpeech = async (
+  playerText: string, 
+  playerGender: 'hombre' | 'mujer', 
+  playerArchetype: string,
+  cpuText: string,
+  cpuGender: 'hombre' | 'mujer',
+  cpuArchetype: string
+) => {
+  if (!isVoiceEnabled) return;
+  try {
+    // Únicamente se sintetiza el diálogo de tu agente
+    await speakText(playerText, playerGender, playerArchetype);
+  } catch (e) {
+    console.error("Error en TTS del agente:", e);
   }
-
-  window.speechSynthesis.speak(utterance);
 };
 ```
 
 ---
 
-## 5. Checklist de Tareas para la Fase 4
+## 5. Checklist de Tareas Completadas
 
-### [ ] Preparación y UI (Frontend)
-- [ ] Diseñar el botón de micrófono en la caja de entrada de acción (`client/src/App.tsx`).
-- [ ] Añadir animaciones de oscilación/onda usando **Anime.js** o CSS cuando el micrófono esté en estado `listening`.
-- [ ] Agregar un interruptor (Toggle) de audio general en la esquina de la interfaz para silenciar/activar las voces.
-
-### [ ] Lógica de Captura (STT)
-- [ ] Integrar el manejador de captura de voz nativa al hacer clic en el botón del micrófono.
-- [ ] Enlazar el resultado del dictado al estado global del input de comandos.
-
-### [ ] Lógica de Reproducción (TTS)
-- [ ] Escuchar el evento de socket con el resultado de la ronda (`player_draft_status`, `resolvePvPRound`).
-- [ ] Ejecutar la función de síntesis de voz pasándole el arquetipo, género y el `verbal_reaction` retornado para cada agente de combate en el log de la ronda.
-
-### [ ] Integración de Configuración
-- [ ] Añadir a la configuración de entorno (`.env` y `src/config.ts`) los flags para habilitar o deshabilitar la síntesis y permitir futuras integraciones de APIs en la nube.
+- `[x]` Diseñar interfaz en la Arena con Toggle de modo de transmisión (Voz/Texto).
+- `[x]` Integrar los controles en la interfaz (botón micrófono + toggle de voz) con estética cyberpunk.
+- `[x]` Crear estados `transmissionMode` y `isProcessingVoice`, y referencias para el timeout en `App.tsx`.
+- `[x]` Modificar `startVoiceRecognition` para auto-detención automática tras 10 segundos.
+- `[x]` Integrar barra visual cyberpunk de carga (de 0% a 100%) durante la grabación mediante transiciones CSS.
+- `[x]` Implementar el envío directo y oculto de la transcripción al transcribir el audio (sin rellenar textarea).
+- `[x]` Ajustar `triggerSequentialSpeech` para sintetizar únicamente la respuesta por voz del agente del jugador.
+- `[x]` Compilar y verificar el funcionamiento en navegador.
