@@ -7,9 +7,10 @@ graph TD
     F1[Fase 1: Motor Base & Simulación CLI] --> F1b[Fase 1.b: Servidor API Local & UI en React + Anime.js]
     F1b --> F2[Fase 2: WebSockets & Base de Datos 1v1]
     F2 --> F3[Fase 3: Mapas Estructurados & Equipamiento]
-    F3 --> F4[F4: Combate Grupal & Voz Bidireccional]
-    F4 --> F5[F5: Interfaz Web Premium & Visuales]
-    F5 --> F6[F6: Creadores & Eventos Dinámicos]
+    F3 --> F4[Fase 4: Audio/Voz Bidireccional]
+    F4 --> F5[Fase 5: Interfaz Web Premium & Visuales]
+    F5 --> F6[Fase 6: Creadores & Eventos Dinámicos]
+    F6 --> F7[Fase 7: Combate Grupal 2v2, 5v5]
 ```
 
 ---
@@ -49,10 +50,9 @@ graph TD
   * **Fase de Draft (Preparación):** Revelado del mapa de combate y fase de preparación de 1 minuto para que los operadores seleccionen hasta 3 boosters óptimos para la sinergia con el escenario.
 
 
-## Fase 4: Combate Grupal (2v2, 5v5) y Audio/Voz Bidireccional
-* **Objetivo:** Escalar el juego a batallas tácticas de equipos e introducir una forma de comunicación más natural e inmersiva.
+## Fase 4: Audio/Voz Bidireccional
+* **Objetivo:** Introducir una forma de comunicación más natural e inmersiva entre operadores y agentes.
 * **Componentes clave:**
-  * **Lógica por Equipos:** Gestión de iniciativas compartidas, curación a aliados, aggro y ataques coordinados entre múltiples agentes de combate.
   * **Integración de Voz (STT/TTS):**
     * Los usuarios pueden hablar por micrófono (STT) y el motor interpreta la voz como prompts de combate.
     * Los agentes de IA responden con voz sintetizada (TTS) en tiempo real, reflejando su personalidad mediante tono y diálogos hablados.
@@ -74,3 +74,8 @@ graph TD
 * **Componentes clave:**
   * **Editor Web de Cartas y Mapas:** Panel visual para que los usuarios creen y compartan sus propios escenarios, armas y agentes respetando las reglas de balance.
   * **Eventos del Máster de IA:** Eventos aleatorios a mitad de combate (cambios climáticos, caídas de suministros, interferencias electromagnéticas) decididos dinámicamente por la IA Máster para romper la monotonía del juego.
+
+## Fase 7: Combate Grupal (2v2, 5v5)
+* **Objetivo:** Escalar el juego a batallas tácticas de equipos.
+* **Componentes clave:**
+  * **Lógica por Equipos:** Gestión de iniciativas compartidas, curación a aliados, aggro y ataques coordinados entre múltiples agentes de combate.
