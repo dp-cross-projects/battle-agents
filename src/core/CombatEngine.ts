@@ -195,6 +195,63 @@ ${forcePanic ? 'NOTA: Debes reaccionar con pánico debido a tu baja moral.' : ''
     }
   }
 
+  /**
+   * Generates and filters/adapts the CPU's action in a single LLM call.
+   */
+  async generateCPUAction(
+    cpuAgent: BattleAgent,
+    playerAgent: BattleAgent,
+    map: MapScenario,
+    forcePanic: boolean,
+    activeBooster?: Booster,
+    allBoosters?: Booster[]
+  ): Promise<LLMActionResponse> {
+    const modifiedStats = this.getModifiedStats(cpuAgent, map, activeBooster, allBoosters);
+
+    const systemInstruction = `Eres la conciencia y el sistema táctico de ${cpuAgent.name} (género: ${cpuAgent.gender}), una unidad enemiga de combate con arquetipo "${cpuAgent.archetype}" y personalidad: "${cpuAgent.personalityDescription}".
+Tu objetivo es derrotar a ${playerAgent.name}. Debes idear tu acción táctica para este turno y devolverla en el formato JSON estructurado requerido.
+
+Tus estadísticas modificadas en este combate son:
+- Fuerza: ${modifiedStats.strength}
+- Agilidad: ${modifiedStats.agility}
+- Percepción: ${modifiedStats.perception}
+- Resiliencia: ${modifiedStats.resilience}
+- Inteligencia: ${modifiedStats.intelligence}
+Nivel de confianza: ${cpuAgent.confidence}/100.
+Escenario actual: ${map.name} (Tags: ${map.tags.join(', ')}).
+${activeBooster ? `Estás usando activamente el booster: ${activeBooster.name} (${activeBooster.description})` : ''}
+
+Reglas de acción:
+- Debes generar una acción de combate que sea realista según tus atributos.
+- Si tu confianza es alta (>70), tus tácticas deben ser audaces y agresivas.
+- Si tu confianza es baja (<30) o si entras en pánico (${forcePanic ? 'SÍ, estás en pánico' : 'no'}), tu acción debe volverse instintivamente defensiva, evasiva o errática.
+- Debes devolver la respuesta estrictamente en el formato JSON especificado.`;
+
+    const prompt = `Genera tu acción de combate para este turno contra ${playerAgent.name}.
+${forcePanic ? 'NOTA: Debes reaccionar con pánico debido a tu baja moral.' : ''}`;
+
+    try {
+      const response = await this.llm.generateStructuredJSON<LLMActionResponse>(
+        prompt,
+        CombatEngine.ACTION_SCHEMA,
+        systemInstruction
+      );
+      if (response) {
+        response.confidence_modifier = typeof response.confidence_modifier === 'number' && !isNaN(response.confidence_modifier)
+          ? response.confidence_modifier
+          : parseInt(response.confidence_modifier as any) || 0;
+      }
+      return response;
+    } catch (error) {
+      // Fallback
+      return this.getFallbackAction(
+        cpuAgent.stats.strength > cpuAgent.stats.perception 
+          ? 'Ataco cuerpo a cuerpo con un golpe directo.'
+          : 'Disparo a distancia buscando un punto débil.',
+        cpuAgent
+      );
+    }
+  }
 
   /**
    * Generates a basic CPU action based on agent archetype and stats.
@@ -497,23 +554,26 @@ Ejemplos:
     map: MapScenario
   ): Promise<string> {
     const systemInstruction = `Eres el "Máster de IA" de Battle Agents.
-Tu tarea es convertir un registro matemático frío de una ronda de combate en un relato literario, emocionante y épico de un solo párrafo (máximo 6 líneas).
-Usa el escenario y sus tags ambientales para describir los detalles.
-Sé coherente con las estadísticas de daño y fallos reportadas.
-No inventes daño o muertes adicionales que no estén en el registro matemático.`;
+Tu tarea es convertir el registro matemático frío de una ronda de combate en un relato literario de acción cyberpunk que sea dinámico, muy breve y emocionante.
+Reglas estrictas:
+1. Sé extremadamente breve y conciso (máximo 2 o 3 líneas, un solo párrafo). Ve directo al grano de la acción física.
+2. Evita preámbulos poéticos lentos sobre el clima o la luz. Enfócate en el intercambio de golpes y sus efectos en el entorno.
+3. NO menciones números exactos de HP ni puntos de daño estadísticos (ej: evita "dejándolo con 82 HP" o "recibe 5 de daño"). Describe la intensidad del impacto cualitativamente (ej: "un corte superficial", "un golpe seco que agrieta su coraza", "esquiva por milímetros").
+4. Da sensación de continuidad y fluidez conectando los movimientos de ambos agentes de forma hilada.
+5. CRÍTICO: Solo describe el colapso, desmayo o derrota de un agente si su HP final en el registro matemático llegó a 0. Si su HP es mayor que 0, sigue en pie y listo para el siguiente turno.`;
 
     const prompt = `Escenario: ${map.name} (Tags: ${map.tags.join(', ')})
-Agente A: ${agentA.name} (Género: ${agentA.gender}, ${agentA.archetype}, HP: ${agentA.currentHp}/100, Confianza: ${agentA.confidence})
-Agente B: ${agentB.name} (Género: ${agentB.gender}, ${agentB.archetype}, HP: ${agentB.currentHp}/100, Confianza: ${agentB.confidence})
+Agente A: ${agentA.name} (HP final de la ronda: ${agentA.currentHp}/100)
+Agente B: ${agentB.name} (HP final de la ronda: ${agentB.currentHp}/100)
 
 Acciones planteadas:
-- ${agentA.name}: "${roundResult.actions[agentA.id].adaptedAction.adapted_prompt}" (Reacción verbal: "${roundResult.actions[agentA.id].adaptedAction.verbal_reaction}")
-- ${agentB.name}: "${roundResult.actions[agentB.id].adaptedAction.adapted_prompt}" (Reacción verbal: "${roundResult.actions[agentB.id].adaptedAction.verbal_reaction}")
+- ${agentA.name}: "${roundResult.actions[agentA.id].adaptedAction.adapted_prompt}"
+- ${agentB.name}: "${roundResult.actions[agentB.id].adaptedAction.adapted_prompt}"
 
 Registro matemático de resolución:
 ${roundResult.mathLog.join('\n')}
 
-Escribe la narración del turno en español:`;
+Escribe la narración breve en español:`;
 
     try {
       return await this.llm.generateText(prompt, systemInstruction);

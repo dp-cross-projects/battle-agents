@@ -7,6 +7,7 @@ import { hashPassword, verifyPassword, generateToken, verifyToken } from './util
 import { dbAgentToBattleAgent } from './utils/mappers.js';
 import { GeminiProvider } from './providers/GeminiProvider.js';
 import { OllamaProvider } from './providers/OllamaProvider.js';
+import { MockProvider } from './providers/MockProvider.js';
 import { CharacterCreator } from './core/CharacterCreator.js';
 import { CombatEngine } from './core/CombatEngine.js';
 import { CONFIG } from './config.js';
@@ -25,6 +26,9 @@ try {
   if (CONFIG.PROVIDER === 'ollama') {
     provider = new OllamaProvider(CONFIG.OLLAMA_ENDPOINT, CONFIG.OLLAMA_MODEL);
     console.log(`[API] OllamaProvider configurado en ${CONFIG.OLLAMA_ENDPOINT} con modelo ${CONFIG.OLLAMA_MODEL}`);
+  } else if (CONFIG.PROVIDER === 'mock') {
+    provider = new MockProvider();
+    console.log(`[API] MockProvider configurado para respuestas simuladas rápidas`);
   } else {
     provider = new GeminiProvider(CONFIG.GEMINI_API_KEY, CONFIG.GEMINI_MODEL);
     console.log(`[API] GeminiProvider configurado con modelo ${CONFIG.GEMINI_MODEL}`);
@@ -281,8 +285,6 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
   }
 
   try {
-    const cpuPrompt = await engine.generateCPUPrompt(session.cpuAgent, session.playerAgent);
-
     // Decide CPU active booster
     let cpuActiveBoosterId: string | null = null;
     const cpuActiveTools = session.cpuBoosters.filter(b => b.currentDurability > 0 && b.type === 'tool');
@@ -312,8 +314,11 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
     const playerActiveBooster = session.playerBoosters.find(b => b.id === activeBoosterId && b.currentDurability > 0);
     const cpuActiveBooster = session.cpuBoosters.find(b => b.id === cpuActiveBoosterId && b.currentDurability > 0);
 
-    const actionA = await engine.filterAgentAction(session.playerAgent, actionPrompt, session.map, playerPanic, playerActiveBooster, session.playerBoosters);
-    const actionB = await engine.filterAgentAction(session.cpuAgent, cpuPrompt, session.map, cpuPanic, cpuActiveBooster, session.cpuBoosters);
+    // Concurrently filter player action and generate/filter CPU action
+    const [actionA, actionB] = await Promise.all([
+      engine.filterAgentAction(session.playerAgent, actionPrompt, session.map, playerPanic, playerActiveBooster, session.playerBoosters),
+      engine.generateCPUAction(session.cpuAgent, session.playerAgent, session.map, cpuPanic, cpuActiveBooster, session.cpuBoosters)
+    ]);
 
     const roundResult = engine.resolveCombatTurn(
       session.playerAgent, 
@@ -715,9 +720,11 @@ async function resolvePvPRound(combat: PvPCombatSession) {
     const player1ActiveBooster = combat.p1.boosters.find(b => b.id === combat.p1.activeBoosterId && b.currentDurability > 0);
     const player2ActiveBooster = combat.p2.boosters.find(b => b.id === combat.p2.activeBoosterId && b.currentDurability > 0);
 
-    // Filter both actions
-    const actionA = await engine.filterAgentAction(combat.p1.agent, combat.p1.action!, combat.map, player1Panic, player1ActiveBooster, combat.p1.boosters);
-    const actionB = await engine.filterAgentAction(combat.p2.agent, combat.p2.action!, combat.map, player2Panic, player2ActiveBooster, combat.p2.boosters);
+    // Filter both actions in parallel
+    const [actionA, actionB] = await Promise.all([
+      engine.filterAgentAction(combat.p1.agent, combat.p1.action!, combat.map, player1Panic, player1ActiveBooster, combat.p1.boosters),
+      engine.filterAgentAction(combat.p2.agent, combat.p2.action!, combat.map, player2Panic, player2ActiveBooster, combat.p2.boosters)
+    ]);
 
     // Resolve mechanics
     const roundResult = engine.resolveCombatTurn(
