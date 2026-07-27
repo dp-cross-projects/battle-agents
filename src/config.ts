@@ -2,8 +2,8 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 export const CONFIG = {
-  // Provider selection: 'gemini' | 'ollama'
-  PROVIDER: (process.env.LLM_PROVIDER || 'gemini').toLowerCase() as 'gemini' | 'ollama',
+  // Provider selection: 'gemini' | 'ollama' | 'mock'
+  PROVIDER: (process.env.LLM_PROVIDER || 'gemini').toLowerCase() as 'gemini' | 'ollama' | 'mock',
 
   // Gemini configs
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',

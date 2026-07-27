@@ -671,9 +671,12 @@ export default function App() {
   const executeActionSubmission = async (prompt: string) => {
     if (!prompt.trim() || isFighting || !playerAgent) return;
 
+    setIsFighting(true);
+    setErrorMsg(null);
+    setPlayerBubble("Transmitiendo enlace neural y orden táctica...");
+    setCpuBubble(combatMode === 'pvp' ? "Esperando enlace neural del operador rival..." : "Sincronizando contramedidas defensivas...");
+
     if (combatMode === 'cpu') {
-      setIsFighting(true);
-      setErrorMsg(null);
       try {
         const res = await fetch('/api/combat/round', {
           method: 'POST',
@@ -738,7 +741,6 @@ export default function App() {
         setIsFighting(false);
       }
     } else if (combatMode === 'pvp' && socket && pvpCombatId) {
-      setIsFighting(true);
       socket.emit('submit_action', {
         combatId: pvpCombatId,
         actionPrompt: prompt,
@@ -1579,6 +1581,28 @@ export default function App() {
                         </div>
                       </div>
                     ))}
+
+                    {isFighting && (
+                      <div className="border-t border-slate-900 pt-3 flex flex-col gap-2 animate-pulse">
+                        <div className="text-[9px] text-purple-400 font-bold tracking-wider">
+                          PROCESANDO SIMULACIÓN DE RONDA {round}...
+                        </div>
+                        <div className="flex flex-col gap-1.5 font-mono text-[10px] text-purple-300">
+                          <div className="flex items-center gap-2">
+                            <span className="animate-spin text-[10px] text-purple-400">⚡</span>
+                            <span>Sincronizando transmisores neurales de combate...</span>
+                          </div>
+                          <div className="flex items-center gap-2 pl-4 text-cyan-400/80">
+                            <span>&gt;</span>
+                            <span>Calculando variables físicas de combate e iniciativa...</span>
+                          </div>
+                          <div className="flex items-center gap-2 pl-4 text-slate-500">
+                            <span>&gt;</span>
+                            <span>Evaluando impacto de escenario ({selectedMap.name})...</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
