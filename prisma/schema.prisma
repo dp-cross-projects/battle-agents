@@ -48,10 +48,16 @@ model Agent {
 
 model Combat {
   id           String   @id @default(uuid())
+  mode         String   @default("cpu") // "cpu" | "pvp"
   mapName      String
   createdAt    DateTime @default(now())
   roundsCount  Int
   mathLog      String   @db.Text // stores detailed calculations / log
+  narrativeLog String   @default("[]") @db.Text // JSON list of round narratives
+  chatLog      String   @default("[]") @db.Text // JSON list of chat messages
+  roundsData   String   @default("[]") @db.Text // JSON list of round damage, hp, actions
+  agent1Name   String   @default("Agente 1")
+  agent2Name   String   @default("Oponente")
 
   // Player 1 (Creator/Challenger)
   player1Id String
@@ -60,10 +66,10 @@ model Combat {
   agent1    Agent  @relation("Agent1Relation", fields: [agent1Id], references: [id])
 
   // Player 2 (Opponent)
-  player2Id String
-  player2   User   @relation("Player2Relation", fields: [player2Id], references: [id])
-  agent2Id  String
-  agent2    Agent  @relation("Agent2Relation", fields: [agent2Id], references: [id])
+  player2Id String?
+  player2   User?   @relation("Player2Relation", fields: [player2Id], references: [id])
+  agent2Id  String?
+  agent2    Agent?  @relation("Agent2Relation", fields: [agent2Id], references: [id])
 
   // Result
   winnerId String?

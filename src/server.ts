@@ -188,6 +188,8 @@ interface CPUCombatSession {
   round: number;
   mathLogs: string[];
   narratives: string[];
+  chatLogs: { senderName: string; text: string; timestamp: number }[];
+  roundsData: any[];
   playerBoosters: Booster[];
   cpuBoosters: Booster[];
 }
@@ -261,6 +263,8 @@ app.post('/api/combat/start', authenticateToken, async (req: any, res) => {
       round: 1,
       mathLogs: [],
       narratives: [`Combate iniciado en el escenario: ${map.name}. ${map.impactDescription}`],
+      chatLogs: [],
+      roundsData: [],
       playerBoosters,
       cpuBoosters
     };
@@ -337,6 +341,17 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
 
     session.mathLogs.push(...roundResult.mathLog, '---');
     session.narratives.push(narrative);
+    session.roundsData.push({
+      round: session.round,
+      narrative,
+      mathLog: roundResult.mathLog,
+      playerHpAfter: session.playerAgent.currentHp,
+      cpuHpAfter: session.cpuAgent.currentHp,
+      playerAction: actionPrompt,
+      cpuAction: actionB.adapted_prompt,
+      playerBoosterId: activeBoosterId || null,
+      cpuBoosterId: cpuActiveBoosterId || null
+    });
 
     let finished = false;
     let winner = '';
@@ -362,16 +377,22 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
         data: { confidence: isNaN(pConf) ? 50 : pConf },
       });
 
-      // 2. Save combat in history
+      // 2. Save combat in history with complete logs
       await prisma.combat.create({
         data: {
+          mode: 'cpu',
           mapName: session.map.name,
           roundsCount: session.round - 1,
           mathLog: session.mathLogs.join('\n'),
+          narrativeLog: JSON.stringify(session.narratives),
+          chatLog: JSON.stringify(session.chatLogs || []),
+          roundsData: JSON.stringify(session.roundsData || []),
+          agent1Name: session.playerAgent.name,
+          agent2Name: session.cpuAgent.name,
           player1Id: session.userId,
           agent1Id: session.dbPlayerAgentId,
-          player2Id: session.userId,
-          agent2Id: session.dbPlayerAgentId,
+          player2Id: null,
+          agent2Id: null,
           winnerId: winner === 'player' ? session.userId : null,
         },
       });
@@ -392,6 +413,201 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
   } catch (error: any) {
     console.error('[API Error] Falló la ronda CPU:', error);
     res.status(500).json({ error: error.message || 'Error en la resolución del turno.' });
+  }
+});
+
+// ==========================================
+// REST API: COMBAT HISTORY & STATS
+// ==========================================
+
+app.get('/api/combat/history', authenticateToken, async (req: any, res) => {
+  try {
+    const combats = await prisma.combat.findMany({
+      where: {
+        OR: [
+          { player1Id: req.userId },
+          { player2Id: req.userId },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const history = combats.map(c => {
+      const isPlayer1 = c.player1Id === req.userId;
+      const myAgentName = isPlayer1 ? c.agent1Name : c.agent2Name;
+      const opponentName = isPlayer1 ? c.agent2Name : c.agent1Name;
+      let outcome: 'win' | 'loss' | 'tie' = 'tie';
+      if (c.winnerId === req.userId) {
+        outcome = 'win';
+      } else if (c.winnerId !== null) {
+        outcome = 'loss';
+      }
+      return {
+        id: c.id,
+        mode: c.mode,
+        mapName: c.mapName,
+        createdAt: c.createdAt,
+        roundsCount: c.roundsCount,
+        myAgentName,
+        opponentName,
+        outcome,
+        isPlayer1
+      };
+    });
+
+    res.json(history);
+  } catch (error: any) {
+    console.error('[API Error] Falló al obtener historial:', error);
+    res.status(500).json({ error: 'Error al recuperar el historial de combates.' });
+  }
+});
+
+app.get('/api/combat/history/:id', authenticateToken, async (req: any, res) => {
+  try {
+    const combat = await prisma.combat.findFirst({
+      where: {
+        id: req.params.id,
+        OR: [
+          { player1Id: req.userId },
+          { player2Id: req.userId },
+        ],
+      },
+    });
+
+    if (!combat) {
+      return res.status(404).json({ error: 'Combate no encontrado.' });
+    }
+
+    const isPlayer1 = combat.player1Id === req.userId;
+    let outcome: 'win' | 'loss' | 'tie' = 'tie';
+    if (combat.winnerId === req.userId) {
+      outcome = 'win';
+    } else if (combat.winnerId !== null) {
+      outcome = 'loss';
+    }
+
+    let narrativeLog: string[] = [];
+    let chatLog: any[] = [];
+    let roundsData: any[] = [];
+
+    try { narrativeLog = JSON.parse(combat.narrativeLog || '[]'); } catch (e) {}
+    try { chatLog = JSON.parse(combat.chatLog || '[]'); } catch (e) {}
+    try { roundsData = JSON.parse(combat.roundsData || '[]'); } catch (e) {}
+
+    res.json({
+      id: combat.id,
+      mode: combat.mode,
+      mapName: combat.mapName,
+      createdAt: combat.createdAt,
+      roundsCount: combat.roundsCount,
+      mathLog: combat.mathLog ? combat.mathLog.split('\n') : [],
+      narrativeLog,
+      chatLog,
+      roundsData,
+      myAgentName: isPlayer1 ? combat.agent1Name : combat.agent2Name,
+      opponentName: isPlayer1 ? combat.agent2Name : combat.agent1Name,
+      outcome,
+    });
+  } catch (error: any) {
+    console.error('[API Error] Falló al obtener detalle de combate:', error);
+    res.status(500).json({ error: 'Error al recuperar detalle del combate.' });
+  }
+});
+
+app.get('/api/stats', authenticateToken, async (req: any, res) => {
+  try {
+    const combats = await prisma.combat.findMany({
+      where: {
+        OR: [
+          { player1Id: req.userId },
+          { player2Id: req.userId },
+        ],
+      },
+    });
+
+    const userAgents = await prisma.agent.findMany({
+      where: { userId: req.userId },
+      select: { id: true, name: true, archetype: true, confidence: true },
+    });
+
+    let totalCombats = combats.length;
+    let wins = 0;
+    let losses = 0;
+    let ties = 0;
+
+    const byMode = {
+      cpu: { total: 0, wins: 0, losses: 0, ties: 0 },
+      pvp: { total: 0, wins: 0, losses: 0, ties: 0 },
+    };
+
+    const agentStatsMap = new Map<string, { agentId: string; agentName: string; archetype: string; confidence: number; total: number; wins: number; losses: number; ties: number }>();
+    userAgents.forEach(a => {
+      agentStatsMap.set(a.id, {
+        agentId: a.id,
+        agentName: a.name,
+        archetype: a.archetype,
+        confidence: a.confidence,
+        total: 0,
+        wins: 0,
+        losses: 0,
+        ties: 0,
+      });
+    });
+
+    combats.forEach(c => {
+      const modeKey = c.mode === 'pvp' ? 'pvp' : 'cpu';
+      byMode[modeKey].total++;
+
+      const isP1 = c.player1Id === req.userId;
+      const myAgentId = isP1 ? c.agent1Id : c.agent2Id;
+
+      let isWin = false;
+      let isLoss = false;
+      let isTie = false;
+
+      if (c.winnerId === req.userId) {
+        wins++;
+        byMode[modeKey].wins++;
+        isWin = true;
+      } else if (c.winnerId !== null) {
+        losses++;
+        byMode[modeKey].losses++;
+        isLoss = true;
+      } else {
+        ties++;
+        byMode[modeKey].ties++;
+        isTie = true;
+      }
+
+      if (myAgentId && agentStatsMap.has(myAgentId)) {
+        const aStat = agentStatsMap.get(myAgentId)!;
+        aStat.total++;
+        if (isWin) aStat.wins++;
+        if (isLoss) aStat.losses++;
+        if (isTie) aStat.ties++;
+      }
+    });
+
+    const winRate = totalCombats > 0 ? ((wins / totalCombats) * 100).toFixed(1) : '0.0';
+
+    const byAgent = Array.from(agentStatsMap.values()).map(a => ({
+      ...a,
+      winRate: a.total > 0 ? ((a.wins / a.total) * 100).toFixed(1) : '0.0',
+    }));
+
+    res.json({
+      totalCombats,
+      wins,
+      losses,
+      ties,
+      winRate,
+      byMode,
+      byAgent,
+    });
+  } catch (error: any) {
+    console.error('[API Error] Falló al obtener estadísticas:', error);
+    res.status(500).json({ error: 'Error al recuperar estadísticas.' });
   }
 });
 
@@ -457,6 +673,8 @@ interface PvPCombatSession {
   };
   mathLogs: string[];
   narratives: string[];
+  chatLogs: { senderName: string; text: string; timestamp: number }[];
+  roundsData: any[];
 }
 
 
@@ -601,12 +819,15 @@ io.on('connection', (socket) => {
 
     const isP1 = combat.p1.userId === userId;
     const senderName = isP1 ? combat.p1.agent.name : combat.p2.agent.name;
+    const timestamp = Date.now();
+
+    combat.chatLogs.push({ senderName, text, timestamp });
 
     const roomName = `room-${combatId}`;
     io.to(roomName).emit('chat_message', {
       senderName,
       text,
-      timestamp: Date.now(),
+      timestamp,
     });
   });
 
@@ -686,6 +907,8 @@ async function checkAndMatchPlayers() {
       },
       mathLogs: [],
       narratives: [`Combate iniciado en el escenario: ${map.name}. ${map.impactDescription}`],
+      chatLogs: [],
+      roundsData: [],
     };
 
     activePvPCombats.set(combatId, session);
@@ -745,6 +968,17 @@ async function resolvePvPRound(combat: PvPCombatSession) {
 
     combat.mathLogs.push(...roundResult.mathLog, '---');
     combat.narratives.push(narrative);
+    combat.roundsData.push({
+      round: combat.round,
+      narrative,
+      mathLog: roundResult.mathLog,
+      p1HpAfter: combat.p1.agent.currentHp,
+      p2HpAfter: combat.p2.agent.currentHp,
+      p1Action: combat.p1.action,
+      p2Action: combat.p2.action,
+      p1BoosterId: combat.p1.activeBoosterId,
+      p2BoosterId: combat.p2.activeBoosterId
+    });
 
     // Reset actions and active booster selections
     combat.p1.action = null;
@@ -786,12 +1020,18 @@ async function resolvePvPRound(combat: PvPCombatSession) {
         data: { confidence: isNaN(p2Conf) ? 50 : p2Conf },
       });
 
-      // 2. Save combat in DB
+      // 2. Save combat in DB with complete logs
       await prisma.combat.create({
         data: {
+          mode: 'pvp',
           mapName: combat.map.name,
           roundsCount: combat.round - 1,
           mathLog: combat.mathLogs.join('\n'),
+          narrativeLog: JSON.stringify(combat.narratives),
+          chatLog: JSON.stringify(combat.chatLogs || []),
+          roundsData: JSON.stringify(combat.roundsData || []),
+          agent1Name: combat.p1.agent.name,
+          agent2Name: combat.p2.agent.name,
           player1Id: combat.p1.userId,
           agent1Id: combat.p1.dbAgentId,
           player2Id: combat.p2.userId,

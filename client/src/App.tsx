@@ -26,6 +26,56 @@ interface ChatMsg {
   timestamp: number;
 }
 
+interface HistoryItem {
+  id: string;
+  mode: string;
+  mapName: string;
+  createdAt: string;
+  roundsCount: number;
+  myAgentName: string;
+  opponentName: string;
+  outcome: 'win' | 'loss' | 'tie';
+  isPlayer1: boolean;
+}
+
+interface HistoryDetail {
+  id: string;
+  mode: string;
+  mapName: string;
+  createdAt: string;
+  roundsCount: number;
+  mathLog: string[];
+  narrativeLog: string[];
+  chatLog: { senderName: string; text: string; timestamp: number }[];
+  roundsData: any[];
+  myAgentName: string;
+  opponentName: string;
+  outcome: 'win' | 'loss' | 'tie';
+}
+
+interface UserStats {
+  totalCombats: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  winRate: string;
+  byMode: {
+    cpu: { total: number; wins: number; losses: number; ties: number };
+    pvp: { total: number; wins: number; losses: number; ties: number };
+  };
+  byAgent: {
+    agentId: string;
+    agentName: string;
+    archetype: string;
+    confidence: number;
+    total: number;
+    wins: number;
+    losses: number;
+    ties: number;
+    winRate: string;
+  }[];
+}
+
 export default function App() {
   // Auth state
   const [token, setToken] = useState<string | null>(localStorage.getItem('ba_token'));
@@ -34,11 +84,19 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // Screen flow: 'auth' | 'lobby' | 'map_selection' | 'draft' | 'matchmaking' | 'arena' | 'result'
-  const [screen, setScreen] = useState<'auth' | 'lobby' | 'map_selection' | 'draft' | 'matchmaking' | 'arena' | 'result'>('auth');
+  // Screen flow: 'auth' | 'lobby' | 'map_selection' | 'draft' | 'matchmaking' | 'arena' | 'result' | 'history'
+  const [screen, setScreen] = useState<'auth' | 'lobby' | 'map_selection' | 'draft' | 'matchmaking' | 'arena' | 'result' | 'history'>('auth');
   const [agents, setAgents] = useState<BattleAgent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<BattleAgent | null>(null);
   const [showCreator, setShowCreator] = useState(false);
+
+  // History & Stats State
+  const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [historyDetail, setHistoryDetail] = useState<HistoryDetail | null>(null);
+  const [historyDetailTab, setHistoryDetailTab] = useState<'narrative' | 'chat' | 'rounds' | 'math'>('narrative');
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   // Boosters State
   const [boosters, setBoosters] = useState<Booster[]>([]);
@@ -233,7 +291,7 @@ export default function App() {
         const name = v.name.toLowerCase();
         const isMale = name.includes('male') || name.includes('david') || name.includes('pablo') || name.includes('julio') || name.includes('helena') === false;
         const isFemale = name.includes('female') || name.includes('helena') || name.includes('sara') || name.includes('zira') || name.includes('sabina');
-        
+
         if (gender === 'hombre') return isSpanish && isMale;
         return isSpanish && isFemale;
       });
@@ -256,8 +314,8 @@ export default function App() {
   };
 
   const triggerSequentialSpeech = async (
-    playerText: string, 
-    playerGender: 'hombre' | 'mujer', 
+    playerText: string,
+    playerGender: 'hombre' | 'mujer',
     playerArchetype: string,
     cpuText: string,
     cpuGender: 'hombre' | 'mujer',
@@ -291,7 +349,7 @@ export default function App() {
     fetch('/api/boosters')
       .then(res => res.json())
       .then(data => setBoosters(data))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
 
@@ -310,6 +368,7 @@ export default function App() {
           setUser(userData);
           setScreen('lobby');
           fetchAgents(token);
+          fetchHistoryAndStats(token);
           connectSocket(token, userData.id);
         })
         .catch(() => {
@@ -331,6 +390,48 @@ export default function App() {
       }
     } catch (err) {
       console.error('Error al cargar agentes:', err);
+    }
+  };
+
+  const fetchHistoryAndStats = async (authToken?: string) => {
+    const activeToken = authToken || token;
+    if (!activeToken) return;
+    setIsHistoryLoading(true);
+    try {
+      const [histRes, statsRes] = await Promise.all([
+        fetch('/api/combat/history', { headers: { 'Authorization': `Bearer ${activeToken}` } }),
+        fetch('/api/stats', { headers: { 'Authorization': `Bearer ${activeToken}` } }),
+      ]);
+      if (histRes.ok) {
+        const histData = await histRes.json();
+        setHistoryList(histData);
+      }
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setUserStats(statsData);
+      }
+    } catch (err) {
+      console.error('Error al recuperar historial y estadísticas:', err);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  };
+
+  const openHistoryDetail = async (id: string) => {
+    const activeToken = token;
+    if (!activeToken) return;
+    setSelectedHistoryId(id);
+    setHistoryDetail(null);
+    try {
+      const res = await fetch(`/api/combat/history/${id}`, {
+        headers: { 'Authorization': `Bearer ${activeToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHistoryDetail(data);
+      }
+    } catch (err) {
+      console.error('Error al cargar detalle del combate:', err);
     }
   };
 
@@ -581,11 +682,11 @@ export default function App() {
     try {
       const res = await fetch('/api/character/create', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           prompt: promptText,
           name: customName || undefined,
           gender: gender || undefined
@@ -633,7 +734,7 @@ export default function App() {
     try {
       const resStart = await fetch('/api/combat/start', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
@@ -650,7 +751,7 @@ export default function App() {
       setCpuAgent(startData.cpuAgent);
       setPlayerBoosters(startData.playerBoosters || []);
       setCpuBoosters(startData.cpuBoosters || []);
-      
+
       prevPlayerHpRef.current = startData.playerAgent.maxHp;
       prevCpuHpRef.current = startData.cpuAgent.maxHp;
 
@@ -680,11 +781,11 @@ export default function App() {
       try {
         const res = await fetch('/api/combat/round', {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             actionPrompt: prompt,
             activeBoosterId: activeBoosterId
           })
@@ -700,11 +801,11 @@ export default function App() {
         setCpuBubble(cReact);
 
         triggerSequentialSpeech(
-          pReact, 
-          playerAgent.gender, 
-          playerAgent.archetype, 
-          cReact, 
-          cpuAgent!.gender, 
+          pReact,
+          playerAgent.gender,
+          playerAgent.archetype,
+          cReact,
+          cpuAgent!.gender,
           cpuAgent!.archetype
         );
 
@@ -784,6 +885,10 @@ export default function App() {
     setActiveBoosterId(null);
     setOpponentDraftConfirmed(false);
     setScreen('lobby');
+    if (token) {
+      fetchAgents(token);
+      fetchHistoryAndStats(token);
+    }
   };
 
   const handleTabChange = (tab: 'log' | 'chat') => {
@@ -805,8 +910,25 @@ export default function App() {
           BATTLE AGENTS
         </h1>
         {user && (
-          <div className="flex items-center gap-4 text-xs font-mono text-slate-400">
+          <div className="flex flex-wrap items-center justify-center gap-3 md:gap-4 text-xs font-mono text-slate-400">
             <span>OPERADOR: <strong className="text-purple-400">{user.username.toUpperCase()}</strong></span>
+            <span>|</span>
+            <button
+              onClick={() => {
+                if (screen === 'history') {
+                  setScreen('lobby');
+                } else {
+                  fetchHistoryAndStats();
+                  setScreen('history');
+                }
+              }}
+              className={`px-3 py-1 rounded border transition cursor-pointer font-bold flex items-center gap-1.5 ${screen === 'history'
+                  ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.3)]'
+                  : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-cyan-500 hover:text-cyan-400'
+                }`}
+            >
+              📊 {screen === 'history' ? 'LOBBY' : 'ESTADÍSTICAS'}
+            </button>
             <span>|</span>
             <button onClick={handleLogout} className="text-red-400 hover:text-red-300 underline cursor-pointer">
               DESCONECTAR
@@ -880,14 +1002,14 @@ export default function App() {
       {/* -------------------- 2. SCREEN: LOBBY -------------------- */}
       {screen === 'lobby' && (
         <div className="w-full max-w-5xl flex flex-col gap-6">
-          
+
           {showCreator ? (
             // Character Creator mode
             <div className="w-full max-w-3xl glass-panel p-8 mx-auto flex flex-col gap-6 relative items-center justify-center text-center">
               <div className="flex justify-between items-center w-full border-b border-slate-800 pb-3 mb-2">
                 <h2 className="text-2xl font-bold font-mono text-white glow-text-purple">CREAR AGENTE</h2>
-                <button 
-                  onClick={() => setShowCreator(false)} 
+                <button
+                  onClick={() => setShowCreator(false)}
                   className="text-xs font-mono text-slate-500 hover:text-slate-200 cursor-pointer"
                 >
                   [ CANCELAR ]
@@ -907,12 +1029,12 @@ export default function App() {
           ) : (
             // Agent list & details
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              
+
               {/* Left Column: List of Agents (4 cols) */}
               <div className="lg:col-span-5 glass-panel p-6 flex flex-col gap-4">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                   <h3 className="font-mono text-sm text-cyan-400 font-bold tracking-wider">TUS AGENTES DE BATALLA</h3>
-                  <button 
+                  <button
                     onClick={() => setShowCreator(true)}
                     className="text-[11px] font-mono bg-purple-950/40 border border-purple-800 text-purple-300 hover:bg-purple-900/40 px-2.5 py-1.5 rounded transition cursor-pointer"
                   >
@@ -930,11 +1052,10 @@ export default function App() {
                       <button
                         key={ag.id}
                         onClick={() => setSelectedAgent(ag)}
-                        className={`w-full flex justify-between items-center p-3.5 rounded-xl border transition-all text-left cursor-pointer ${
-                          selectedAgent?.id === ag.id
+                        className={`w-full flex justify-between items-center p-3.5 rounded-xl border transition-all text-left cursor-pointer ${selectedAgent?.id === ag.id
                             ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
                             : 'bg-slate-950/40 border-slate-900 hover:border-slate-800 hover:bg-slate-900/20'
-                        }`}
+                          }`}
                       >
                         <div className="flex flex-col gap-1">
                           <strong className="text-sm text-white font-mono">{ag.name}</strong>
@@ -954,7 +1075,7 @@ export default function App() {
               <div className="lg:col-span-7 flex flex-col gap-6">
                 {selectedAgent ? (
                   <div className="glass-panel p-6 flex flex-col gap-5">
-                    
+
                     {/* Basic details */}
                     <div className="border-b border-slate-800/80 pb-3 flex justify-between items-start">
                       <div>
@@ -1045,7 +1166,7 @@ export default function App() {
             {maps.map((map) => {
               const theme = MAP_THEMES[map.name] || { icon: '🗺️', clr: 'var(--clr-cyan)' };
               return (
-                <button 
+                <button
                   key={map.name}
                   disabled={isGenerating}
                   onClick={() => selectMapForCPU(map)}
@@ -1128,13 +1249,12 @@ export default function App() {
                   const boosterId = selectedBoosters[slotIdx];
                   const bDetails = boosters.find(b => b.id === boosterId);
                   return (
-                    <div 
-                      key={slotIdx} 
-                      className={`flex-grow md:flex-grow-0 md:w-44 h-11 border rounded-lg flex items-center justify-center p-2 text-center text-xs font-mono transition-all duration-300 ${
-                        bDetails 
-                          ? 'bg-purple-950/20 border-purple-500/50 text-purple-300' 
+                    <div
+                      key={slotIdx}
+                      className={`flex-grow md:flex-grow-0 md:w-44 h-11 border rounded-lg flex items-center justify-center p-2 text-center text-xs font-mono transition-all duration-300 ${bDetails
+                          ? 'bg-purple-950/20 border-purple-500/50 text-purple-300'
                           : 'bg-black/40 border-slate-900 text-slate-650 border-dashed'
-                      }`}
+                        }`}
                     >
                       {bDetails ? bDetails.name : `[ Ranura Vacía ]`}
                     </div>
@@ -1196,13 +1316,12 @@ export default function App() {
                           setSelectedBoosters(prev => [...prev, b.id]);
                         }
                       }}
-                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${
-                        isSelected 
-                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.1)]' 
-                          : isLimit 
+                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
+                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.1)]'
+                          : isLimit
                             ? 'bg-slate-950/20 border-slate-950 opacity-40 cursor-not-allowed'
                             : 'bg-slate-950/40 border-slate-900 hover:border-slate-850 hover:bg-slate-900/10'
-                      }`}
+                        }`}
                     >
                       <div className="flex justify-between items-start w-full">
                         <strong className="text-sm text-white font-mono">{b.name}</strong>
@@ -1247,13 +1366,12 @@ export default function App() {
                           setSelectedBoosters(prev => [...prev, b.id]);
                         }
                       }}
-                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${
-                        isSelected 
-                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.15)]' 
-                          : isLimit 
+                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
+                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
+                          : isLimit
                             ? 'bg-slate-950/20 border-slate-950 opacity-40 cursor-not-allowed'
                             : 'bg-slate-950/40 border-slate-900 hover:border-slate-850 hover:bg-slate-900/10'
-                      }`}
+                        }`}
                     >
                       <div className="flex justify-between items-start w-full">
                         <div className="flex items-center gap-2">
@@ -1302,13 +1420,12 @@ export default function App() {
                           setSelectedBoosters(prev => [...prev, b.id]);
                         }
                       }}
-                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${
-                        isSelected 
-                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.15)]' 
-                          : isLimit 
+                      className={`flex flex-col text-left p-4.5 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
+                          ? 'bg-purple-950/20 border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
+                          : isLimit
                             ? 'bg-slate-950/20 border-slate-950 opacity-40 cursor-not-allowed'
                             : 'bg-slate-950/40 border-slate-900 hover:border-slate-850 hover:bg-slate-900/10'
-                      }`}
+                        }`}
                     >
                       <div className="flex justify-between items-start w-full">
                         <strong className="text-sm text-white font-mono">{b.name}</strong>
@@ -1346,7 +1463,7 @@ export default function App() {
             <span className="text-purple-400 font-bold">{selectedAgent.name}</span>
           </div>
 
-          <button 
+          <button
             onClick={cancelMatchmaking}
             className="w-full btn-neon btn-neon-purple text-xs"
           >
@@ -1358,7 +1475,7 @@ export default function App() {
       {/* -------------------- 5. SCREEN: ARENA -------------------- */}
       {screen === 'arena' && playerAgent && cpuAgent && selectedMap && (
         <div className="w-full max-w-6xl flex flex-col gap-6">
-          
+
           {/* Header Panel */}
           <div className="glass-panel p-6 flex flex-col gap-5 border border-slate-800">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-800/60">
@@ -1376,11 +1493,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-                  className={`btn-neon font-mono text-xs px-3 py-2 flex items-center gap-1.5 cursor-pointer ${
-                    isVoiceEnabled 
-                      ? 'btn-neon-cyan' 
+                  className={`btn-neon font-mono text-xs px-3 py-2 flex items-center gap-1.5 cursor-pointer ${isVoiceEnabled
+                      ? 'btn-neon-cyan'
                       : 'border border-slate-855 text-slate-500 bg-slate-950/60 hover:border-slate-800'
-                  }`}
+                    }`}
                 >
                   {isVoiceEnabled ? '🔊 VOZ ACTIVA' : '🔇 VOZ SILENCIADA'}
                 </button>
@@ -1430,15 +1546,14 @@ export default function App() {
                                 setActiveBoosterId(b.id);
                               }
                             }}
-                            className={`flex-1 p-2 rounded-lg border text-left font-mono text-[10px] flex flex-col justify-between transition-all duration-200 cursor-pointer ${
-                              isBroken
+                            className={`flex-1 p-2 rounded-lg border text-left font-mono text-[10px] flex flex-col justify-between transition-all duration-200 cursor-pointer ${isBroken
                                 ? 'bg-black/60 border-slate-950 text-slate-700'
                                 : isActiveSelected
                                   ? 'bg-cyan-950/30 border-cyan-500 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.2)]'
                                   : canActivate
                                     ? 'bg-slate-950 border-slate-900 hover:border-slate-800 text-slate-300 hover:scale-[1.02]'
                                     : 'bg-slate-950 border-slate-900 text-slate-400 opacity-80 cursor-default' // passives (armor)
-                            }`}
+                              }`}
                           >
                             <div className="flex justify-between w-full font-bold">
                               <span className={isBroken ? 'line-through text-slate-650' : ''}>{b.name}</span>
@@ -1485,11 +1600,10 @@ export default function App() {
                         return (
                           <div
                             key={b.id}
-                            className={`flex-1 p-2 rounded-lg border text-left font-mono text-[10px] flex flex-col justify-between ${
-                              isBroken
+                            className={`flex-1 p-2 rounded-lg border text-left font-mono text-[10px] flex flex-col justify-between ${isBroken
                                 ? 'bg-black/60 border-slate-950 text-slate-700'
                                 : 'bg-slate-950 border-slate-900 text-slate-400 opacity-90'
-                            }`}
+                              }`}
                           >
                             <div className="flex justify-between w-full font-bold">
                               <span className={isBroken ? 'line-through text-slate-650' : ''}>{b.name}</span>
@@ -1513,12 +1627,12 @@ export default function App() {
 
           {/* Cards & Tabbed terminal Console */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            
+
             {/* Left side: Dialogue bubbles */}
             <div className="lg:col-span-5 flex flex-col gap-4">
               <div className="glass-panel p-5 flex flex-col gap-3">
                 <span className="text-[10px] font-mono text-purple-400 uppercase tracking-widest block font-bold border-b border-slate-900 pb-2">ENLACE NEURAL ACTIVO</span>
-                
+
                 <div className="flex flex-col gap-4 my-2">
                   <div className="flex flex-col gap-1.5">
                     <span className="text-[9px] font-mono text-purple-400 font-bold">{playerAgent.name} (Tú):</span>
@@ -1534,28 +1648,26 @@ export default function App() {
 
             {/* Right side: Console Terminal with Logs & Chat tabs */}
             <div className="lg:col-span-7 flex flex-col gap-4">
-              
+
               <div className="glass-panel p-5 flex flex-col gap-4 border border-slate-800">
-                
+
                 {/* Tabs */}
                 <div className="flex border-b border-slate-850 font-mono text-xs">
                   <button
                     onClick={() => handleTabChange('log')}
-                    className={`pb-2.5 px-4 font-bold border-b-2 cursor-pointer transition-colors ${
-                      activeTab === 'log' 
-                        ? 'border-cyan-500 text-cyan-400' 
+                    className={`pb-2.5 px-4 font-bold border-b-2 cursor-pointer transition-colors ${activeTab === 'log'
+                        ? 'border-cyan-500 text-cyan-400'
                         : 'border-transparent text-slate-500 hover:text-slate-300'
-                    }`}
+                      }`}
                   >
                     [ BITÁCORA DE COMBATE ]
                   </button>
                   <button
                     onClick={() => handleTabChange('chat')}
-                    className={`pb-2.5 px-4 font-bold border-b-2 cursor-pointer transition-colors relative ${
-                      activeTab === 'chat' 
-                        ? 'border-cyan-500 text-cyan-400' 
+                    className={`pb-2.5 px-4 font-bold border-b-2 cursor-pointer transition-colors relative ${activeTab === 'chat'
+                        ? 'border-cyan-500 text-cyan-400'
                         : 'border-transparent text-slate-500 hover:text-slate-300'
-                    }`}
+                      }`}
                   >
                     [ CHAT DE OPERADORES ]
                     {unreadChat && (
@@ -1566,7 +1678,7 @@ export default function App() {
 
                 {/* Tab content 1: Combat log */}
                 {activeTab === 'log' && (
-                  <div 
+                  <div
                     className="bg-black/85 border border-slate-900 p-4 rounded-xl font-mono text-xs md:text-sm leading-relaxed text-slate-300 overflow-y-auto flex flex-col gap-4 max-h-[300px] min-h-[220px] scrollbar-thin"
                     ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}
                   >
@@ -1609,7 +1721,7 @@ export default function App() {
                 {/* Tab content 2: PvP Chat */}
                 {activeTab === 'chat' && (
                   <div className="flex flex-col gap-3">
-                    <div 
+                    <div
                       className="bg-black/85 border border-slate-900 p-4 rounded-xl font-mono text-xs md:text-sm leading-relaxed text-slate-300 overflow-y-auto flex flex-col gap-3 max-h-[240px] min-h-[170px] scrollbar-thin"
                       ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}
                     >
@@ -1655,11 +1767,10 @@ export default function App() {
                       type="button"
                       disabled={isFighting || isListening || isProcessingVoice}
                       onClick={() => setTransmissionMode('voice')}
-                      className={`flex-1 sm:flex-initial px-3 py-1.5 rounded text-[10px] font-bold tracking-wider transition-all duration-200 cursor-pointer ${
-                        transmissionMode === 'voice'
+                      className={`flex-1 sm:flex-initial px-3 py-1.5 rounded text-[10px] font-bold tracking-wider transition-all duration-200 cursor-pointer ${transmissionMode === 'voice'
                           ? 'bg-cyan-500 text-black shadow-[0_0_8px_rgba(6,182,212,0.3)]'
                           : 'text-slate-500 hover:text-slate-350'
-                      }`}
+                        }`}
                     >
                       🎙️ ENLACE NEURAL (VOZ)
                     </button>
@@ -1667,11 +1778,10 @@ export default function App() {
                       type="button"
                       disabled={isFighting || isListening || isProcessingVoice}
                       onClick={() => setTransmissionMode('text')}
-                      className={`flex-1 sm:flex-initial px-3 py-1.5 rounded text-[10px] font-bold tracking-wider transition-all duration-200 cursor-pointer ${
-                        transmissionMode === 'text'
+                      className={`flex-1 sm:flex-initial px-3 py-1.5 rounded text-[10px] font-bold tracking-wider transition-all duration-200 cursor-pointer ${transmissionMode === 'text'
                           ? 'bg-cyan-500 text-black shadow-[0_0_8px_rgba(6,182,212,0.3)]'
                           : 'text-slate-500 hover:text-slate-350'
-                      }`}
+                        }`}
                     >
                       ⌨️ CONSOLA DE TEXTO
                     </button>
@@ -1747,7 +1857,7 @@ export default function App() {
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                       CONSOLA DE TEXTO: TRANSMITIR ACCIÓN
                     </label>
-                    <textarea 
+                    <textarea
                       disabled={isFighting}
                       value={playerActionPrompt}
                       onChange={(e) => setPlayerActionPrompt(e.target.value)}
@@ -1755,7 +1865,7 @@ export default function App() {
                       placeholder="Ej: 'Aprovecha el entorno para flanquear y atacar...' o 'Esquiva los proyectiles cubriéndote'..."
                       className="w-full bg-slate-950/80 border border-slate-900 hover:border-slate-800 focus:border-cyan-500 text-white rounded-lg p-3 outline-none text-xs placeholder:text-slate-700 transition resize-none"
                     />
-                    
+
                     <div className="flex justify-between items-center mt-1">
                       <div>
                         {combatMode === 'pvp' && isFighting && (
@@ -1764,7 +1874,7 @@ export default function App() {
                           </span>
                         )}
                       </div>
-                      <button 
+                      <button
                         type="submit"
                         disabled={isFighting || !playerActionPrompt.trim()}
                         className="btn-neon btn-neon-cyan px-6 py-2.5 text-xs w-full sm:w-auto"
@@ -1777,8 +1887,8 @@ export default function App() {
 
                 {/* Show Math log toggler */}
                 <div className="mt-1 border-t border-slate-850 pt-2.5">
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     onClick={() => setShowMathLog(!showMathLog)}
                     className="text-[10px] font-mono text-slate-500 hover:text-slate-350 flex items-center gap-1 cursor-pointer"
                   >
@@ -1843,12 +1953,397 @@ export default function App() {
             </div>
           </div>
 
-          <button 
+          <button
             onClick={handleResetGame}
             className="w-full btn-neon btn-neon-purple mt-4"
           >
             VOLVER AL LOBBY
           </button>
+        </div>
+      )}
+
+      {/* -------------------- 7. SCREEN: HISTORY & STATS -------------------- */}
+      {screen === 'history' && (
+        <div className="w-full max-w-5xl flex flex-col gap-6">
+
+          {/* Top Bar with back button */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-800">
+            <div>
+              <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest block font-bold">REGISTRO CENTRAL DE COMBATES</span>
+              <h2 className="text-2xl font-bold font-mono text-white glow-text-cyan">HISTORIAL Y ESTADÍSTICAS</h2>
+            </div>
+            <button
+              onClick={() => setScreen('lobby')}
+              className="btn-neon btn-neon-purple text-xs py-2 px-4 cursor-pointer"
+            >
+              ← VOLVER AL LOBBY
+            </button>
+          </div>
+
+          {/* Stats Cards */}
+          {userStats && (
+            <div className="flex flex-col gap-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="glass-panel p-4 flex flex-col gap-1 border-slate-800">
+                  <span className="text-[10px] font-mono text-slate-500 uppercase font-bold">TOTAL COMBATES</span>
+                  <div className="flex items-baseline justify-between">
+                    <strong className="text-2xl font-mono text-white">{userStats.totalCombats}</strong>
+                    <span className="text-xl">⚔️</span>
+                  </div>
+                </div>
+
+                <div className="glass-panel p-4 flex flex-col gap-1 border-emerald-950/60 bg-emerald-950/10">
+                  <span className="text-[10px] font-mono text-emerald-400 uppercase font-bold">VICTORIAS</span>
+                  <div className="flex items-baseline justify-between">
+                    <strong className="text-2xl font-mono text-emerald-400">{userStats.wins}</strong>
+                    <span className="text-xl">🏆</span>
+                  </div>
+                </div>
+
+                <div className="glass-panel p-4 flex flex-col gap-1 border-rose-950/60 bg-rose-950/10">
+                  <span className="text-[10px] font-mono text-rose-400 uppercase font-bold">DERROTAS</span>
+                  <div className="flex items-baseline justify-between">
+                    <strong className="text-2xl font-mono text-rose-400">{userStats.losses}</strong>
+                    <span className="text-xl">💀</span>
+                  </div>
+                </div>
+
+                <div className="glass-panel p-4 flex flex-col gap-1 border-cyan-950/60 bg-cyan-950/10">
+                  <span className="text-[10px] font-mono text-cyan-400 uppercase font-bold">TASA DE VICTORIA</span>
+                  <div className="flex items-baseline justify-between">
+                    <strong className="text-2xl font-mono text-cyan-300">{userStats.winRate}%</strong>
+                    <span className="text-xl">⚡</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Breakdown by Mode & Agent Stats */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+                {/* Mode Breakdown (5 cols) */}
+                <div className="lg:col-span-5 glass-panel p-5 flex flex-col gap-4">
+                  <h3 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider border-b border-slate-850 pb-2">
+                    🎯 Rendimiento por Modo
+                  </h3>
+
+                  <div className="flex flex-col gap-3 font-mono text-xs">
+                    <div className="bg-slate-950/60 border border-slate-900 p-3 rounded-lg flex flex-col gap-1.5">
+                      <div className="flex justify-between font-bold text-slate-200">
+                        <span>ENTRENAMIENTO (CPU)</span>
+                        <span className="text-cyan-400">{userStats.byMode.cpu.wins}V - {userStats.byMode.cpu.losses}D ({userStats.byMode.cpu.total > 0 ? ((userStats.byMode.cpu.wins / userStats.byMode.cpu.total) * 100).toFixed(0) : 0}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+                        <div className="h-full bg-cyan-500 rounded-full" style={{ width: `${userStats.byMode.cpu.total > 0 ? (userStats.byMode.cpu.wins / userStats.byMode.cpu.total) * 100 : 0}%` }}></div>
+                      </div>
+                      <span className="text-[10px] text-slate-500">Total: {userStats.byMode.cpu.total} combates</span>
+                    </div>
+
+                    <div className="bg-slate-950/60 border border-slate-900 p-3 rounded-lg flex flex-col gap-1.5">
+                      <div className="flex justify-between font-bold text-slate-200">
+                        <span>MULTIJUGADOR ONLINE (PVP)</span>
+                        <span className="text-purple-400">{userStats.byMode.pvp.wins}V - {userStats.byMode.pvp.losses}D ({userStats.byMode.pvp.total > 0 ? ((userStats.byMode.pvp.wins / userStats.byMode.pvp.total) * 100).toFixed(0) : 0}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+                        <div className="h-full bg-purple-500 rounded-full" style={{ width: `${userStats.byMode.pvp.total > 0 ? (userStats.byMode.pvp.wins / userStats.byMode.pvp.total) * 100 : 0}%` }}></div>
+                      </div>
+                      <span className="text-[10px] text-slate-500">Total: {userStats.byMode.pvp.total} combates</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Agent Performance Table (7 cols) */}
+                <div className="lg:col-span-7 glass-panel p-5 flex flex-col gap-4">
+                  <h3 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider border-b border-slate-850 pb-2">
+                    🤖 Estadísticas por Agente
+                  </h3>
+
+                  <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto pr-1">
+                    {userStats.byAgent.length === 0 ? (
+                      <span className="text-xs text-slate-500 italic font-mono">No hay datos de agentes aún.</span>
+                    ) : (
+                      userStats.byAgent.map(ag => (
+                        <div key={ag.agentId} className="bg-slate-950/50 border border-slate-900 p-3 rounded-xl flex justify-between items-center text-xs font-mono">
+                          <div className="flex flex-col">
+                            <strong className="text-white text-sm">{ag.agentName}</strong>
+                            <span className="text-[10px] text-slate-500 capitalize">{ARCHETYPE_LABELS[ag.archetype] || ag.archetype}</span>
+                          </div>
+
+                          <div className="flex items-center gap-6">
+                            <div className="text-right">
+                              <span className="text-[9px] text-slate-500 block">RÉCORD</span>
+                              <span className="text-slate-300 font-bold">{ag.wins}V / {ag.losses}D / {ag.ties}E</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[9px] text-slate-500 block">WIN RATE</span>
+                              <span className="text-cyan-400 font-bold">{ag.winRate}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {/* Combats History Section */}
+          <div className="glass-panel p-6 flex flex-col gap-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h3 className="font-mono text-sm text-cyan-400 font-bold tracking-wider">📜 BITÁCORA DE COMBATES RECIENTES</h3>
+              <button
+                onClick={() => fetchHistoryAndStats()}
+                disabled={isHistoryLoading}
+                className="text-[11px] font-mono bg-slate-950 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 px-3 py-1.5 rounded transition cursor-pointer"
+              >
+                {isHistoryLoading ? 'ACTUALIZANDO...' : '🔄 REFRESCAR'}
+              </button>
+            </div>
+
+            {historyList.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 font-mono text-xs italic">
+                No hay combates registrados en tu historial. Juega tu primera partida para acumular registros de bitácora y chats.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {historyList.map(c => {
+                  const isWin = c.outcome === 'win';
+                  const isLoss = c.outcome === 'loss';
+                  return (
+                    <div
+                      key={c.id}
+                      className={`p-4 rounded-xl border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all ${isWin ? 'bg-emerald-950/10 border-emerald-900/60 hover:border-emerald-500/60' :
+                          isLoss ? 'bg-rose-950/10 border-rose-900/60 hover:border-rose-500/60' :
+                            'bg-amber-950/10 border-amber-900/60 hover:border-amber-500/60'
+                        }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`px-2.5 py-1 rounded text-xs font-mono font-extrabold uppercase tracking-wider border ${isWin ? 'bg-emerald-950 border-emerald-500/60 text-emerald-400' :
+                            isLoss ? 'bg-rose-950 border-rose-500/60 text-rose-400' :
+                              'bg-amber-950 border-amber-500/60 text-amber-400'
+                          }`}>
+                          {isWin ? 'VICTORIA' : isLoss ? 'DERROTA' : 'EMPATE'}
+                        </span>
+
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-400 uppercase">
+                          {c.mode === 'pvp' ? '⚔️ PvP Online' : '🤖 VS CPU'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-6 font-mono text-xs text-slate-300">
+                        <div>
+                          <span className="text-white font-bold">{c.myAgentName}</span>
+                          <span className="text-slate-500 px-1.5">vs</span>
+                          <span className="text-slate-400">{c.opponentName}</span>
+                        </div>
+
+                        <div className="text-slate-400 text-[11px]">
+                          Mapa: <strong className="text-purple-400">{c.mapName}</strong> ({c.roundsCount} Rondas)
+                        </div>
+
+                        <div className="text-slate-500 text-[10px]">
+                          {new Date(c.createdAt).toLocaleDateString()} {new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => openHistoryDetail(c.id)}
+                        className="btn-neon btn-neon-cyan text-[11px] py-1.5 px-3 self-end md:self-auto cursor-pointer font-mono"
+                      >
+                        📜 VER BITÁCORA
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+          </div>
+
+          {/* Modal / Detailed Combat Log Viewer */}
+          {selectedHistoryId && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+              <div className="w-full max-w-4xl max-h-[90vh] glass-panel p-6 flex flex-col gap-5 border border-cyan-500/50 shadow-[0_0_30px_rgba(6,182,212,0.2)] overflow-hidden">
+
+                {/* Modal Header */}
+                <div className="flex justify-between items-start border-b border-slate-800 pb-3">
+                  <div>
+                    <span className="text-[10px] font-mono text-cyan-400 uppercase font-bold tracking-widest block">REGISTRO COMPLETO DE COMBATE</span>
+                    <h3 className="text-xl font-bold font-mono text-white glow-text-cyan mt-0.5">
+                      {historyDetail ? `${historyDetail.myAgentName} vs ${historyDetail.opponentName}` : 'Cargando registros...'}
+                    </h3>
+                  </div>
+
+                  <button
+                    onClick={() => { setSelectedHistoryId(null); setHistoryDetail(null); }}
+                    className="text-xs font-mono text-slate-400 hover:text-white bg-slate-950 border border-slate-800 px-3 py-1.5 rounded cursor-pointer"
+                  >
+                    ✕ CERRAR
+                  </button>
+                </div>
+
+                {!historyDetail ? (
+                  <div className="py-20 flex flex-col items-center justify-center gap-3">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-cyan-500"></div>
+                    <span className="text-xs font-mono text-cyan-400 animate-pulse">Desencriptando archivos de bitácora...</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4 overflow-hidden">
+                    {/* Summary Info */}
+                    <div className="bg-slate-950/80 border border-slate-900 p-3.5 rounded-xl grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono text-center">
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">RESULTADO</span>
+                        <strong className={historyDetail.outcome === 'win' ? 'text-emerald-400' : historyDetail.outcome === 'loss' ? 'text-rose-400' : 'text-amber-400'}>
+                          {historyDetail.outcome === 'win' ? 'VICTORIA' : historyDetail.outcome === 'loss' ? 'DERROTA' : 'EMPATE'}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">ESCENARIO</span>
+                        <strong className="text-purple-400">{historyDetail.mapName}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">DURACIÓN</span>
+                        <strong className="text-white">{historyDetail.roundsCount} RONDAS</strong>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-500 block">MODO</span>
+                        <strong className="text-cyan-400 uppercase">{historyDetail.mode}</strong>
+                      </div>
+                    </div>
+
+                    {/* Tabs navigation */}
+                    <div className="flex border-b border-slate-800 font-mono text-xs gap-2">
+                      <button
+                        onClick={() => setHistoryDetailTab('narrative')}
+                        className={`px-4 py-2 border-b-2 font-bold cursor-pointer transition ${historyDetailTab === 'narrative'
+                            ? 'border-cyan-400 text-cyan-400 bg-cyan-950/20'
+                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                          }`}
+                      >
+                        📜 Bitácora Narrativa ({historyDetail.narrativeLog.length})
+                      </button>
+
+                      <button
+                        onClick={() => setHistoryDetailTab('chat')}
+                        className={`px-4 py-2 border-b-2 font-bold cursor-pointer transition ${historyDetailTab === 'chat'
+                            ? 'border-purple-400 text-purple-400 bg-purple-950/20'
+                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                          }`}
+                      >
+                        💬 Chat de Partida ({historyDetail.chatLog.length})
+                      </button>
+
+                      <button
+                        onClick={() => setHistoryDetailTab('rounds')}
+                        className={`px-4 py-2 border-b-2 font-bold cursor-pointer transition ${historyDetailTab === 'rounds'
+                            ? 'border-emerald-400 text-emerald-400 bg-emerald-950/20'
+                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                          }`}
+                      >
+                        🛡️ Desglose por Rondas ({historyDetail.roundsData.length})
+                      </button>
+
+                      <button
+                        onClick={() => setHistoryDetailTab('math')}
+                        className={`px-4 py-2 border-b-2 font-bold cursor-pointer transition ${historyDetailTab === 'math'
+                            ? 'border-amber-400 text-amber-400 bg-amber-950/20'
+                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                          }`}
+                      >
+                        📐 Logs Matemáticos ({historyDetail.mathLog.length})
+                      </button>
+                    </div>
+
+                    {/* Tab content */}
+                    <div className="max-h-[50vh] overflow-y-auto p-4 bg-slate-950/70 border border-slate-900 rounded-xl font-mono text-xs">
+                      {historyDetailTab === 'narrative' && (
+                        <div className="flex flex-col gap-3">
+                          {historyDetail.narrativeLog.length === 0 ? (
+                            <span className="text-slate-500 italic">No hay relatos registrados en esta partida.</span>
+                          ) : (
+                            historyDetail.narrativeLog.map((narr, idx) => (
+                              <div key={idx} className="bg-slate-900/40 border border-slate-850 p-3 rounded-lg flex flex-col gap-1 text-slate-300 leading-relaxed">
+                                <span className="text-[10px] text-cyan-400 font-bold">RONDA / EVENTO #{idx + 1}</span>
+                                <p>{narr}</p>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+
+                      {historyDetailTab === 'chat' && (
+                        <div className="flex flex-col gap-2.5">
+                          {historyDetail.chatLog.length === 0 ? (
+                            <span className="text-slate-500 italic text-center py-6">No se enviaron mensajes de chat durante este combate.</span>
+                          ) : (
+                            historyDetail.chatLog.map((msg, idx) => (
+                              <div key={idx} className="flex flex-col bg-slate-900/50 border border-slate-850 p-2.5 rounded-lg">
+                                <div className="flex justify-between items-center text-[10px] text-slate-500 mb-1">
+                                  <strong className="text-purple-400">{msg.senderName}</strong>
+                                  <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                                </div>
+                                <span className="text-slate-200 text-xs">{msg.text}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+
+                      {historyDetailTab === 'rounds' && (
+                        <div className="flex flex-col gap-3">
+                          {historyDetail.roundsData.length === 0 ? (
+                            <span className="text-slate-500 italic">Sin datos estructurados por ronda.</span>
+                          ) : (
+                            historyDetail.roundsData.map((rd, idx) => (
+                              <div key={idx} className="bg-slate-900/60 border border-slate-800 p-3 rounded-xl flex flex-col gap-2">
+                                <div className="flex justify-between border-b border-slate-800 pb-1.5 font-bold text-slate-300">
+                                  <span>RONDA #{rd.round || idx + 1}</span>
+                                  <span className="text-cyan-400">
+                                    HP: {rd.playerHpAfter !== undefined ? rd.playerHpAfter : rd.p1HpAfter} vs {rd.cpuHpAfter !== undefined ? rd.cpuHpAfter : rd.p2HpAfter}
+                                  </span>
+                                </div>
+
+                                <div className="text-[11px] text-slate-400">
+                                  <span className="text-slate-500 block text-[9px]">TU ORDEN / ACCIÓN ({historyDetail.myAgentName}):</span>
+                                  <span className="text-slate-200 font-medium">{rd.playerAction || rd.p1Action || 'Sin acción'}</span>
+                                </div>
+
+                                {rd.narrative && (
+                                  <p className="text-[11px] text-purple-300 italic bg-purple-950/20 p-2 rounded border border-purple-900/40 mt-1">
+                                    {rd.narrative}
+                                  </p>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+
+                      {historyDetailTab === 'math' && (
+                        <div className="flex flex-col gap-1 text-[10px]">
+                          {historyDetail.mathLog.length === 0 ? (
+                            <span className="text-slate-500 italic">No hay logs matemáticos guardados.</span>
+                          ) : (
+                            historyDetail.mathLog.map((line, idx) => (
+                              <span
+                                key={idx}
+                                className={line.startsWith('Daño:') ? 'text-orange-400 font-bold' : line.startsWith('⚠️') ? 'text-yellow-400' : 'text-slate-400'}
+                              >
+                                {line}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          )}
+
         </div>
       )}
     </div>
@@ -1865,7 +2360,7 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
   const [promptVal, setPromptVal] = useState('');
   const [nameVal, setNameVal] = useState('');
   const [genderVal, setGenderVal] = useState<'hombre' | 'mujer' | ''>('');
-  
+
   const examples = [
     'Un ciborg silencioso experto en infiltración y dagas.',
     'Un paladín de acero pesado que defiende con su escudo gigante.',
@@ -1906,11 +2401,10 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
               type="button"
               disabled={isLoading}
               onClick={() => setGenderVal('hombre')}
-              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${
-                genderVal === 'hombre'
+              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${genderVal === 'hombre'
                   ? 'bg-purple-950/40 border-purple-500 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.2)]'
                   : 'bg-slate-950/60 border-slate-900 text-slate-400 hover:border-slate-800 hover:text-slate-200'
-              }`}
+                }`}
             >
               <span>👨</span> Hombre
             </button>
@@ -1918,11 +2412,10 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
               type="button"
               disabled={isLoading}
               onClick={() => setGenderVal('mujer')}
-              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${
-                genderVal === 'mujer'
+              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${genderVal === 'mujer'
                   ? 'bg-purple-950/40 border-purple-500 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.2)]'
                   : 'bg-slate-950/60 border-slate-900 text-slate-400 hover:border-slate-800 hover:text-slate-200'
-              }`}
+                }`}
             >
               <span>👩</span> Mujer
             </button>
@@ -1930,11 +2423,10 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
               type="button"
               disabled={isLoading}
               onClick={() => setGenderVal('')}
-              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${
-                genderVal === ''
+              className={`flex items-center justify-center gap-1.5 rounded-xl border font-mono text-xs cursor-pointer transition-all duration-200 ${genderVal === ''
                   ? 'bg-purple-950/40 border-purple-500 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.2)]'
                   : 'bg-slate-950/60 border-slate-900 text-slate-400 hover:border-slate-800 hover:text-slate-200'
-              }`}
+                }`}
             >
               <span>🎲</span> Aleatorio
             </button>
@@ -1946,7 +2438,7 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
         <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400">
           Descripción / Concepto del Agente
         </label>
-        <textarea 
+        <textarea
           disabled={isLoading}
           value={promptVal}
           onChange={(e) => setPromptVal(e.target.value)}
@@ -1962,7 +2454,7 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
         </span>
         <div className="flex flex-col gap-1.5 w-full max-w-lg">
           {examples.map((ex) => (
-            <button 
+            <button
               key={ex}
               type="button"
               disabled={isLoading}
@@ -1975,7 +2467,7 @@ function CharacterCreatorForm({ onSubmit, isLoading }: CharacterCreatorFormProps
         </div>
       </div>
 
-      <button 
+      <button
         type="submit"
         disabled={isLoading || !promptVal.trim()}
         className="w-full max-w-md self-center btn-neon btn-neon-purple mt-2 disabled:opacity-50 disabled:pointer-events-none py-3 text-xs font-mono cursor-pointer"
