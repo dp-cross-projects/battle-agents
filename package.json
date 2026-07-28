@@ -11,8 +11,7 @@
     "dev:client": "vite client",
     "build:client": "vite build client",
     "build:server": "tsc",
-    "build": "prisma generate && vite build client && tsc",
-    "postinstall": "prisma generate",
+    "build": "npm run build:client && npm run build:server",
     "start": "node dist/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
