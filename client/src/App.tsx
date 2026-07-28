@@ -949,7 +949,15 @@ export default function App() {
 
       {/* -------------------- 1. SCREEN: AUTH -------------------- */}
       {screen === 'auth' && (
-        <div className="w-full max-w-md glass-panel p-8 flex flex-col gap-6 relative items-center text-center">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!isAuthLoading && usernameInput && passwordInput) {
+              handleAuth('login');
+            }
+          }}
+          className="w-full max-w-md glass-panel p-8 flex flex-col gap-6 relative items-center text-center"
+        >
           <div className="flex flex-col gap-2">
             <h2 className="text-2xl font-bold font-mono text-white glow-text-purple">OPERATOR LOG IN</h2>
             <p className="text-slate-400 text-xs font-mono">Autentique su firma digital para acceder a la red de agentes.</p>
@@ -982,6 +990,7 @@ export default function App() {
 
           <div className="grid grid-cols-2 gap-4 w-full mt-2 font-mono">
             <button
+              type="submit"
               onClick={() => handleAuth('login')}
               disabled={isAuthLoading || !usernameInput || !passwordInput}
               className="btn-neon btn-neon-cyan text-xs"
@@ -989,6 +998,7 @@ export default function App() {
               {isAuthLoading ? 'Cargando...' : 'INICIAR SESIÓN'}
             </button>
             <button
+              type="button"
               onClick={() => handleAuth('register')}
               disabled={isAuthLoading || !usernameInput || !passwordInput}
               className="btn-neon btn-neon-purple text-xs"
@@ -996,7 +1006,7 @@ export default function App() {
               REGISTRARSE
             </button>
           </div>
-        </div>
+        </form>
       )}
 
       {/* -------------------- 2. SCREEN: LOBBY -------------------- */}
@@ -1861,6 +1871,14 @@ export default function App() {
                       disabled={isFighting}
                       value={playerActionPrompt}
                       onChange={(e) => setPlayerActionPrompt(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (!isFighting && playerActionPrompt.trim()) {
+                            handleExecuteRound(e);
+                          }
+                        }
+                      }}
                       rows={2}
                       placeholder="Ej: 'Aprovecha el entorno para flanquear y atacar...' o 'Esquiva los proyectiles cubriéndote'..."
                       className="w-full bg-slate-950/80 border border-slate-900 hover:border-slate-800 focus:border-cyan-500 text-white rounded-lg p-3 outline-none text-xs placeholder:text-slate-700 transition resize-none"
