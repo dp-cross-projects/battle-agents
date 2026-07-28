@@ -98,6 +98,10 @@ export default function App() {
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
+  // Forfeit Confirmation Modal State
+  const [showSurrenderModal, setShowSurrenderModal] = useState(false);
+  const [pendingNavAction, setPendingNavAction] = useState<'history' | 'logout' | null>(null);
+
   // Boosters State
   const [boosters, setBoosters] = useState<Booster[]>([]);
   const [selectedBoosters, setSelectedBoosters] = useState<string[]>([]);
@@ -435,6 +439,86 @@ export default function App() {
     }
   };
 
+  // Intercept tab closing or reloading during active match
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (screen === 'arena' || screen === 'draft') {
+        e.preventDefault();
+        e.returnValue = 'Tienes un combate activo. Si abandonas la página, la pelea se registrará como DERROTA.';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [screen]);
+
+  const handleNavToHistory = () => {
+    if (screen === 'arena' || screen === 'draft') {
+      setPendingNavAction('history');
+      setShowSurrenderModal(true);
+    } else if (screen === 'history') {
+      setScreen('lobby');
+    } else {
+      fetchHistoryAndStats();
+      setScreen('history');
+    }
+  };
+
+  const handleNavToLogout = () => {
+    if (screen === 'arena' || screen === 'draft') {
+      setPendingNavAction('logout');
+      setShowSurrenderModal(true);
+    } else {
+      handleLogout();
+    }
+  };
+
+  const handleConfirmSurrender = async () => {
+    setShowSurrenderModal(false);
+
+    if (combatMode === 'cpu') {
+      try {
+        await fetch('/api/combat/forfeit', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      } catch (e) {
+        console.error('Error al rendir combate CPU:', e);
+      }
+    } else if (combatMode === 'pvp' && socket && pvpCombatId) {
+      socket.emit('surrender_match', { combatId: pvpCombatId });
+    }
+
+    // Reset game state
+    setPlayerAgent(null);
+    setCpuAgent(null);
+    setSelectedMap(null);
+    setWinner(null);
+    setRound(1);
+    setNarrativeHistory([]);
+    setMathLogs([]);
+    setChatLogs([]);
+    setCombatMode(null);
+    setPvpCombatId(null);
+    setSelectedBoosters([]);
+    setPlayerBoosters([]);
+    setCpuBoosters([]);
+    setActiveBoosterId(null);
+    setOpponentDraftConfirmed(false);
+
+    const action = pendingNavAction;
+    setPendingNavAction(null);
+
+    if (action === 'logout') {
+      handleLogout();
+    } else {
+      await fetchHistoryAndStats();
+      setScreen('history');
+    }
+  };
+
   const connectSocket = (authToken: string, currentUserId: string) => {
     if (socket) socket.close();
 
@@ -552,12 +636,30 @@ export default function App() {
       }
     });
 
+    s.on('opponent_surrendered', ({ winnerId, forfeitingUserId, reason }) => {
+      const isWinner = winnerId === currentUserId;
+      setWinner(isWinner ? 'player' : 'cpu');
+      setErrorMsg(isWinner ? `¡Tu oponente ha abandonado el combate (${reason})! Se te ha asignado la VICTORIA.` : 'Has abandonado la partida.');
+      setTimeout(() => {
+        setScreen('result');
+        if (token) {
+          fetchAgents(token);
+          fetchHistoryAndStats(token);
+        }
+      }, 1800);
+    });
 
-    s.on('opponent_disconnected', () => {
-      setErrorMsg('Tu oponente se desconectó. Combate cancelado.');
-      setScreen('lobby');
-      setCombatMode(null);
-      setPvpCombatId(null);
+    s.on('opponent_disconnected', ({ userId: disconnectedUserId }) => {
+      const isWinner = disconnectedUserId !== currentUserId;
+      setWinner(isWinner ? 'player' : 'cpu');
+      setErrorMsg(isWinner ? 'Tu oponente se desconectó de la red. ¡Se te asigna la VICTORIA!' : 'Desconectado del servidor.');
+      setTimeout(() => {
+        setScreen('result');
+        if (token) {
+          fetchAgents(token);
+          fetchHistoryAndStats(token);
+        }
+      }, 1800);
     });
 
     s.on('error_msg', (msg) => {
@@ -914,14 +1016,7 @@ export default function App() {
             <span>OPERADOR: <strong className="text-purple-400">{user.username.toUpperCase()}</strong></span>
             <span>|</span>
             <button
-              onClick={() => {
-                if (screen === 'history') {
-                  setScreen('lobby');
-                } else {
-                  fetchHistoryAndStats();
-                  setScreen('history');
-                }
-              }}
+              onClick={handleNavToHistory}
               className={`px-3 py-1 rounded border transition cursor-pointer font-bold flex items-center gap-1.5 ${screen === 'history'
                   ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.3)]'
                   : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-cyan-500 hover:text-cyan-400'
@@ -930,7 +1025,7 @@ export default function App() {
               📊 {screen === 'history' ? 'LOBBY' : 'ESTADÍSTICAS'}
             </button>
             <span>|</span>
-            <button onClick={handleLogout} className="text-red-400 hover:text-red-300 underline cursor-pointer">
+            <button onClick={handleNavToLogout} className="text-red-400 hover:text-red-300 underline cursor-pointer">
               DESCONECTAR
             </button>
           </div>
@@ -2362,6 +2457,40 @@ export default function App() {
             </div>
           )}
 
+        </div>
+      )}
+
+      {/* Surrender Confirmation Modal */}
+      {showSurrenderModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md glass-panel p-6 flex flex-col gap-5 border border-rose-500/60 shadow-[0_0_35px_rgba(244,63,94,0.3)] text-center font-mono">
+            <span className="text-4xl">⚠️</span>
+            <div className="flex flex-col gap-1">
+              <h3 className="text-xl font-bold text-white glow-text-rose uppercase tracking-wider">
+                ¿ABANDONAR COMBATE ACTIVO?
+              </h3>
+              <p className="text-slate-300 text-xs leading-relaxed mt-2">
+                Estás a punto de salir de un combate en curso. Esta acción registrará la partida como <strong className="text-rose-400 font-bold underline">DERROTA</strong> en tu historial y afectará las estadísticas de tu agente.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <button
+                type="button"
+                onClick={() => { setShowSurrenderModal(false); setPendingNavAction(null); }}
+                className="btn-neon btn-neon-cyan text-xs py-2.5 cursor-pointer font-mono font-bold"
+              >
+                CONTINUAR LUCHANDO
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSurrender}
+                className="bg-rose-950/90 hover:bg-rose-900 border border-rose-600 text-rose-200 rounded-xl text-xs font-bold py-2.5 transition cursor-pointer font-mono shadow-[0_0_15px_rgba(244,63,94,0.3)]"
+              >
+                ABANDONAR Y PERDER
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

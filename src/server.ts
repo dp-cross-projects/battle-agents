@@ -416,6 +416,51 @@ app.post('/api/combat/round', authenticateToken, async (req: any, res) => {
   }
 });
 
+app.post('/api/combat/forfeit', authenticateToken, async (req: any, res) => {
+  const session = activeCPUSessions[req.userId];
+  if (!session) {
+    return res.json({ success: true, message: 'No hay combate CPU activo.' });
+  }
+
+  try {
+    session.narratives.push('⚠️ El operador abandonó el combate. Se registra como derrota.');
+
+    // Update persistent agent confidence: decrease slightly on forfeit
+    const newConf = Math.max(0, Math.min(100, Math.round(session.playerAgent.confidence - 5)));
+    await prisma.agent.update({
+      where: { id: session.dbPlayerAgentId },
+      data: { confidence: newConf },
+    });
+
+    // Save combat record as loss (winnerId = null, CPU wins)
+    await prisma.combat.create({
+      data: {
+        mode: 'cpu',
+        mapName: session.map.name,
+        roundsCount: session.round,
+        mathLog: session.mathLogs.join('\n'),
+        narrativeLog: JSON.stringify(session.narratives),
+        chatLog: JSON.stringify(session.chatLogs || []),
+        roundsData: JSON.stringify(session.roundsData || []),
+        agent1Name: session.playerAgent.name,
+        agent2Name: session.cpuAgent.name,
+        player1Id: session.userId,
+        agent1Id: session.dbPlayerAgentId,
+        player2Id: null,
+        agent2Id: null,
+        winnerId: null, // CPU win -> player loss
+      },
+    });
+
+    delete activeCPUSessions[req.userId];
+    console.log(`[API CPU] Combate abandonado por usuario ${req.userId}. Registrado como derrota.`);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('[API Error] Error al abandonar combate CPU:', error);
+    res.status(500).json({ error: 'Error al registrar rendición.' });
+  }
+});
+
 // ==========================================
 // REST API: COMBAT HISTORY & STATS
 // ==========================================
@@ -831,22 +876,87 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('disconnect', () => {
+  socket.on('surrender_match', async ({ combatId }) => {
+    const combat = activePvPCombats.get(combatId);
+    if (!combat) return;
+
+    const isP1 = combat.p1.userId === userId;
+    const isP2 = combat.p2.userId === userId;
+    if (!isP1 && !isP2) return;
+
+    await handlePvPForfeit(combat, userId, 'Rendición voluntaria');
+  });
+
+  socket.on('disconnect', async () => {
     console.log(`[Socket] Desconectado usuario: ${userId}`);
     matchmakingQueue = matchmakingQueue.filter(p => p.socketId !== socket.id);
 
     // Check if user was in an active PvP combat
     for (const [combatId, combat] of activePvPCombats.entries()) {
       if (combat.p1.socketId === socket.id || combat.p2.socketId === socket.id) {
-        const roomName = `room-${combatId}`;
-        io.to(roomName).emit('opponent_disconnected', { userId });
-        activePvPCombats.delete(combatId);
-        console.log(`[PvP] Combate cancelado ${combatId} por desconexión.`);
+        await handlePvPForfeit(combat, userId, 'Desconexión de red');
         break;
       }
     }
   });
 });
+
+async function handlePvPForfeit(combat: PvPCombatSession, forfeitingUserId: string, reason: string) {
+  try {
+    const isP1 = combat.p1.userId === forfeitingUserId;
+    const winnerId = isP1 ? combat.p2.userId : combat.p1.userId;
+    const winnerAgentName = isP1 ? combat.p2.agent.name : combat.p1.agent.name;
+    const forfeitingAgentName = isP1 ? combat.p1.agent.name : combat.p2.agent.name;
+
+    combat.narratives.push(`⚠️ El operador de ${forfeitingAgentName} abandonó la batalla (${reason}). ¡Victoria para ${winnerAgentName}!`);
+
+    // Update confidence: winner +5, forfeiter -5
+    const p1Conf = Math.max(0, Math.min(100, Math.round(Number(combat.p1.agent.confidence) + (isP1 ? -5 : 5))));
+    const p2Conf = Math.max(0, Math.min(100, Math.round(Number(combat.p2.agent.confidence) + (isP1 ? 5 : -5))));
+
+    await prisma.agent.update({
+      where: { id: combat.p1.dbAgentId },
+      data: { confidence: isNaN(p1Conf) ? 50 : p1Conf },
+    });
+    await prisma.agent.update({
+      where: { id: combat.p2.dbAgentId },
+      data: { confidence: isNaN(p2Conf) ? 50 : p2Conf },
+    });
+
+    // Save in DB with clear winner
+    await prisma.combat.create({
+      data: {
+        mode: 'pvp',
+        mapName: combat.map.name,
+        roundsCount: combat.round,
+        mathLog: combat.mathLogs.join('\n'),
+        narrativeLog: JSON.stringify(combat.narratives),
+        chatLog: JSON.stringify(combat.chatLogs || []),
+        roundsData: JSON.stringify(combat.roundsData || []),
+        agent1Name: combat.p1.agent.name,
+        agent2Name: combat.p2.agent.name,
+        player1Id: combat.p1.userId,
+        agent1Id: combat.p1.dbAgentId,
+        player2Id: combat.p2.userId,
+        agent2Id: combat.p2.dbAgentId,
+        winnerId,
+      },
+    });
+
+    const roomName = `room-${combat.id}`;
+    io.to(roomName).emit('opponent_surrendered', {
+      winnerId,
+      forfeitingUserId,
+      reason
+    });
+
+    activePvPCombats.delete(combat.id);
+    console.log(`[PvP] Combate ${combat.id} abandonado por ${forfeitingUserId}. Registrado como victoria para ${winnerId}.`);
+  } catch (err) {
+    console.error('[PvP Error] Error al procesar rendición/desconexión:', err);
+    activePvPCombats.delete(combat.id);
+  }
+}
 
 async function checkAndMatchPlayers() {
   if (matchmakingQueue.length < 2) return;
