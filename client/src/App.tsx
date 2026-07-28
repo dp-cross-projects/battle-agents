@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { animate, stagger } from 'animejs';
 import { io, Socket } from 'socket.io-client';
-import { BattleAgent, MapScenario, CombatRoundResult } from '../../src/types/index';
+import { BattleAgent, MapScenario, CombatRoundResult, Booster } from '../../src/types/index';
 
 // Pre-defined maps details mapping for icons/illustrations
 const MAP_THEMES: Record<string, { icon: string; clr: string }> = {
@@ -693,8 +693,7 @@ export default function App() {
   useEffect(() => {
     if (playerAgent && screen === 'map_selection') {
       animate('.stat-bar-fill', {
-        width: (el: HTMLElement) => el.getAttribute('data-value') + '%',
-        ease: 'out-elastic(1, .6)',
+        width: (el: any) => el.getAttribute('data-value') + '%',
         duration: 1400,
         delay: stagger(120)
       });
@@ -1437,11 +1436,14 @@ export default function App() {
                       <p className="text-slate-400 text-[11px] leading-relaxed mt-2.5 flex-grow">{b.description}</p>
                       {b.statsModifiers && (
                         <div className="flex gap-1.5 mt-3 flex-wrap">
-                          {Object.entries(b.statsModifiers).map(([stat, val]) => (
-                            <span key={stat} className="text-[9px] font-mono text-purple-400 bg-purple-950/30 border border-purple-900/60 px-1.5 py-0.2 rounded font-bold uppercase font-bold">
-                              {stat}: {val > 0 ? `+${val}` : val}
-                            </span>
-                          ))}
+                          {Object.entries(b.statsModifiers).map(([stat, val]) => {
+                            const numVal = Number(val);
+                            return (
+                              <span key={stat} className="text-[9px] font-mono text-purple-400 bg-purple-950/30 border border-purple-900/60 px-1.5 py-0.2 rounded font-bold uppercase font-bold">
+                                {stat}: {numVal > 0 ? `+${numVal}` : numVal}
+                              </span>
+                            );
+                          })}
                         </div>
                       )}
                     </button>
@@ -1492,11 +1494,14 @@ export default function App() {
                       <p className="text-slate-400 text-[11px] leading-relaxed mt-2.5 flex-grow">{b.description}</p>
                       {b.statsModifiers && (
                         <div className="flex gap-1.5 mt-3 flex-wrap">
-                          {Object.entries(b.statsModifiers).map(([stat, val]) => (
-                            <span key={stat} className="text-[9px] font-mono text-purple-400 bg-purple-950/30 border border-purple-900/60 px-1.5 py-0.2 rounded font-bold uppercase font-bold">
-                              {stat}: {val > 0 ? `+${val}` : val}
-                            </span>
-                          ))}
+                          {Object.entries(b.statsModifiers).map(([stat, val]) => {
+                            const numVal = Number(val);
+                            return (
+                              <span key={stat} className="text-[9px] font-mono text-purple-400 bg-purple-950/30 border border-purple-900/60 px-1.5 py-0.2 rounded font-bold uppercase font-bold">
+                                {stat}: {numVal > 0 ? `+${numVal}` : numVal}
+                              </span>
+                            );
+                          })}
                         </div>
                       )}
                     </button>
