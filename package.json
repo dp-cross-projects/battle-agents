@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev:server": "tsx src/server.ts",
     "dev:client": "vite client",
     "build:client": "vite build client",
     "build:server": "tsc",
-    "build": "npm run build:client && npm run build:server",
+    "build": "prisma generate && vite build client && tsc",
+    "postinstall": "prisma generate",
     "start": "node dist/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
